@@ -31,8 +31,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.7.0")]
-[assembly: AssemblyFileVersion("1.0.7.0")]
+[assembly: AssemblyVersion("1.0.8.0")]
+[assembly: AssemblyFileVersion("1.0.8.0")]
 
 namespace BingWallpaperWin
 {
@@ -964,6 +964,64 @@ namespace BingWallpaperWin
     // image is still missing (the UpdateScheduleManager role).
     // ------------------------------------------------------------------
 
+    // ---------------- about dialog ----------------
+    // The house About, shared by all three Windows tray apps:
+    // name, version, Idea: Otakun, Coding: Dash, and a link labelled
+    // "GitHub Repository" (never the raw URL as the link text).
+    class AboutForm : Form
+    {
+        public AboutForm()
+        {
+            Text = "About";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false; MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(340, 196);
+            Font = new Font("Microsoft YaHei UI", 9f);
+
+            var title = new Label();
+            title.Text = "BingWallpaper";
+            title.Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold);
+            title.Location = new Point(16, 14);
+            title.Size = new Size(308, 24);
+            Controls.Add(title);
+
+            var ver = new Label();
+            ver.Text = "Version " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+            ver.Location = new Point(16, 46);
+            ver.Size = new Size(308, 18);
+            Controls.Add(ver);
+
+            var idea = new Label();
+            idea.Text = "Idea: Otakun";
+            idea.Location = new Point(16, 78);
+            idea.Size = new Size(308, 18);
+            Controls.Add(idea);
+
+            var coding = new Label();
+            coding.Text = "Coding: Dash";
+            coding.Location = new Point(16, 100);
+            coding.Size = new Size(308, 18);
+            Controls.Add(coding);
+
+            var link = new LinkLabel();
+            link.Text = "GitHub Repository";
+            link.Location = new Point(16, 128);
+            link.Size = new Size(308, 18);
+            link.LinkClicked += delegate { System.Diagnostics.Process.Start("https://github.com/iam-otakun/BingWallpaper-for-Windows"); };
+            Controls.Add(link);
+
+            var btn = new Button();
+            btn.Text = "Close";
+            btn.Location = new Point(244, 158);
+            btn.Size = new Size(80, 28);
+            btn.DialogResult = DialogResult.OK;
+            Controls.Add(btn);
+            AcceptButton = btn;
+            CancelButton = btn;
+        }
+    }
+
     class TrayApp : ApplicationContext
     {
         private NotifyIcon tray;
@@ -1037,6 +1095,13 @@ namespace BingWallpaperWin
             updateItem = new ToolStripMenuItem("Check for Updates…");
             updateItem.Click += async delegate { await CheckForUpdates(true); };
             menu.Items.Add(updateItem);
+
+            var aboutItem = new ToolStripMenuItem("About…");
+            aboutItem.Click += delegate
+            {
+                using (var f = new AboutForm()) f.ShowDialog();
+            };
+            menu.Items.Add(aboutItem);
 
             var quitItem = new ToolStripMenuItem("Quit");
             quitItem.Click += delegate { ExitThread(); };

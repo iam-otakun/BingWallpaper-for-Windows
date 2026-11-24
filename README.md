@@ -87,6 +87,12 @@ feedback when you refresh by hand.
   并随附 `BingWallpaper.exe.config`，请与 exe 放在一起。缺了它，裸 csc
   构建的 exe 会落回旧式 TLS 默认：Bing 容忍，GitHub 直接拒绝握手——
   1.0.6 的检查更新正是这样永远到不了 GitHub 的。
+- **About / 关于** — The tray menu's About… shows the house About:
+  name, version, Idea: Otakun, Coding: Dash, and a link labelled
+  "GitHub Repository" — the same About as our other Windows and macOS
+  programs. / 托盘菜单的 About… 是统一规格：程序名、版本、
+  Idea: Otakun、Coding: Dash、一条写着「GitHub Repository」的链接——
+  与我们其它 Windows、macOS 程序同一规格。
 - **Retention / 保留期** — Keep images 5 / 10 / 50 / 100 days, or forever.
   保留 5 / 10 / 50 / 100 天，或永久保留。
 - **Launch at login / 开机自启** — Optional, via the current user's Run
