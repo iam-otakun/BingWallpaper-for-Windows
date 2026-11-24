@@ -30,8 +30,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.5.0")]
+[assembly: AssemblyFileVersion("1.0.5.0")]
 
 namespace BingWallpaperWin
 {
@@ -540,6 +540,76 @@ namespace BingWallpaperWin
             return UpdateOutcome.Updated;
         }
 
+        // After a file-name-format change: re-resolve the names of the
+        // on-disk archive entries the market feeds can still describe,
+        // rename the files to the new format, and point each entry's
+        // copyright at the new format's display language so the menu
+        // title follows the format. Entries older than the feed window
+        // keep their download-time names, exactly as before. The image
+        // bytes never change — a rename is the whole operation.
+        public static async Task<int> ReformatArchive(FileNameFormat format)
+        {
+            List<BingImage> primary;
+            try
+            {
+                if (format == FileNameFormat.English)
+                    primary = await FetchEntries(8, "en-US").ConfigureAwait(false);
+                else if (format == FileNameFormat.Bilingual)
+                    primary = await FetchEntries(9, "zh-CN").ConfigureAwait(false);
+                else
+                    primary = await FetchEntries(8, LocalMarket()).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log("ReformatArchive fetch failed: " + ex.Message);
+                return 0;
+            }
+            if (primary == null || primary.Count == 0) return 0;
+
+            List<IndexEntry> index = LoadIndex();
+            int renamed = 0;
+            foreach (IndexEntry ie in index)
+            {
+                if (!IsOnDisk(ie)) continue;
+                BingImage fresh = null;
+                foreach (BingImage e in primary)
+                    if (e.startdate == ie.StartDate) { fresh = e; break; }
+                if (fresh == null) continue;
+
+                string newName = await ResolveFileName(fresh, format).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(newName) || newName == ie.FileName)
+                {
+                    // Name already fits the format; still refresh the
+                    // display copyright so the title speaks the format's
+                    // language.
+                    ie.Copyright = fresh.copyright;
+                    ie.CopyrightLink = fresh.copyrightlink;
+                    ie.Title = fresh.title;
+                    continue;
+                }
+                if (newName == ie.StartDate + ".jpg") continue; // resolver fallback: keep the good name
+                string oldPath = Path.Combine(SaveDir, ie.FileName);
+                string newPath = Path.Combine(SaveDir, newName);
+                try
+                {
+                    if (File.Exists(newPath)) continue;
+                    File.Move(oldPath, newPath);
+                }
+                catch (Exception ex)
+                {
+                    Log("ReformatArchive rename failed for " + ie.StartDate + ": " + ex.Message);
+                    continue;
+                }
+                ie.FileName = newName;
+                ie.Copyright = fresh.copyright;
+                ie.CopyrightLink = fresh.copyrightlink;
+                ie.Title = fresh.title;
+                renamed++;
+            }
+            SaveIndex(index);
+            return renamed;
+        }
+
         private static void Cleanup(List<IndexEntry> index)
         {
             int keep = Settings.KeepDays;
@@ -655,6 +725,12 @@ namespace BingWallpaperWin
             titleItem = new ToolStripMenuItem("(no image yet)");
             titleItem.Click += delegate { OpenCopyrightLink(); };
             menu.Items.Add(titleItem);
+
+            stickItem = new ToolStripMenuItem("Stick With This Picture");
+            stickItem.Checked = Settings.StickEnabled;
+            stickItem.Click += delegate { ToggleStick(); };
+            menu.Items.Add(stickItem);
+
             menu.Items.Add(new ToolStripSeparator());
 
             var openItem = new ToolStripMenuItem("Open Photo Folder");
@@ -677,11 +753,6 @@ namespace BingWallpaperWin
             var todayItem = new ToolStripMenuItem("Today");
             todayItem.Click += delegate { JumpToToday(); };
             menu.Items.Add(todayItem);
-
-            stickItem = new ToolStripMenuItem("Stick With This Picture");
-            stickItem.Checked = Settings.StickEnabled;
-            stickItem.Click += delegate { ToggleStick(); };
-            menu.Items.Add(stickItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -869,10 +940,34 @@ namespace BingWallpaperWin
 
         private void ShowSettings()
         {
+            FileNameFormat before = Settings.Format;
+            DialogResult result;
             using (var form = new SettingsForm())
             {
-                form.ShowDialog();
+                result = form.ShowDialog();
             }
+            if (result == DialogResult.OK && Settings.Format != before)
+            {
+                var ignored = ReformatAfterSettingsChange();
+            }
+        }
+
+        private async Task ReformatAfterSettingsChange()
+        {
+            if (updating) return;
+            updating = true;
+            try
+            {
+                await Core.ReformatArchive(Settings.Format);
+                // Re-apply the current picture from its (possibly renamed)
+                // file so the wallpaper and the menu title follow the new
+                // format immediately. Stick and browsing state are kept:
+                // the same picture stays up, only its name changes.
+                EnsureWallpaperCurrent();
+                RefreshTitle();
+            }
+            catch (Exception ex) { Core.Log("Reformat after settings change failed: " + ex.Message); }
+            finally { updating = false; }
         }
     }
 
