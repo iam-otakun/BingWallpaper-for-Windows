@@ -55,14 +55,30 @@ feedback when you refresh by hand.
   特别喜欢某张就打钩钉住：每天照常拉新图入库，只是不再更换壁纸；取消
   打钩，立刻换上今天的图。钉住的图也不会被保留期清理删掉。这一项就
   放在菜单最上方、紧贴它钉住的那张图——开关和它作用的对象在一组。
+  钉住期间点 Previous Day / Next Day / Today 浏览别的天，等于松开
+  钉子：Stick 自动取消打勾，壁纸与标题跟着点击一起更新——三者永远
+  一致，不会出现勾还打着、状态却已经走开的局面。
 - **Custom file names / 自定义文件名** — Three formats, same as the Mac
   version: English, bilingual (Chinese + English), or local language.
   Changing the format in Settings takes effect immediately: today's and
   the recent photos are renamed to the new format, the wallpaper is
-  re-applied, and the menu title follows. 三档文件名格式，与 Mac 版
-  一致：英文、双语（中文+英文）、本地语言。在设置里改完格式点 OK
-  立刻生效：今天和最近的照片按新格式改名，壁纸重新设定，菜单标题
-  同步更新。
+  re-applied, and the menu title follows. Pressing OK in Settings
+  applies the selected format even when it did not change, which also
+  heals names that never matched it. Names are resolved by matching the
+  photo's image key in each market's feed, never by date alone — see the
+  note below. 三档文件名格式，与 Mac 版一致：英文、双语（中文+英文）、
+  本地语言。在设置里改完格式点 OK 立刻生效：今天和最近的照片按新格式
+  改名，壁纸重新设定，菜单标题同步更新。即使格式没变，按 OK 也会把
+  所选格式应用一遍——顺带把从未匹配上格式的名字一并修复。文件名一律
+  按照片的图像标识在各市场源里配对解析，绝不只按日期配对（见下方
+  实测说明）。
+- **Self-update / 在线更新** — The app checks GitHub Releases at most
+  once a day and offers the update with a balloon; "Check for Updates…"
+  in the menu checks on demand. Installing downloads the release zip,
+  swaps the exe and restarts the app — no manual download, unzip and
+  overwrite any more. 程序每天最多自动检查一次 GitHub 发布，有新版本
+  时弹气泡提示；菜单里的「Check for Updates…」可随时手动检查。点安装
+  即自动下载发布包、替换程序并重启——不必再手动下载、解压、覆盖。
 - **Retention / 保留期** — Keep images 5 / 10 / 50 / 100 days, or forever.
   保留 5 / 10 / 50 / 100 天，或永久保留。
 - **Launch at login / 开机自启** — Optional, via the current user's Run
@@ -83,6 +99,26 @@ Bing 按出口 IP 分市场，不只看 `mkt` 参数：国内出口请求 `mkt=e
 完全一致）。App 会识别这种情况——若「英文」关键词与中文相同，就只用
 中文关键词命名，不再在连字符后重复一遍；在真正能拿到 en-US 元数据的
 出口下，双语文件名会按设计完整出现。
+
+Markets also run **different editorial selections**: the same date is
+not the same photo everywhere (verified 2026-11-24 from a Japan exit:
+2026-11-23 was the Cairngorms red squirrel in the zh-CN and ja-JP
+selections, but the fiddlehead fern in en-US — and the fern was zh-CN's
+2026-11-22 photo). Three consequences, all handled since 1.0.6: the
+bilingual resolver matches the Chinese and English feeds independently,
+so a photo that ran in only one market still gets that market's name
+instead of a bare date; a format change never renames a file from a
+same-date entry of another market (a different photo) — entries are
+matched by image key; and a name that once fell back to a bare
+`yyyyMMdd.jpg` is re-resolved and renamed on a later update.
+
+各市场还是**各自选图**的：同一天在不同市场不是同一张照片（2026-11-24
+日本出口实测：2026-11-23 在 zh-CN 与 ja-JP 是凯恩戈姆斯红松鼠，在
+en-US 却是蕨菜卷叶；而蕨菜是 zh-CN 的 2026-11-22）。三条后果，1.0.6
+起全部处理：双语解析把中文源与英文源独立配对，只在一个市场出现过的
+照片也能拿到那个市场的名字，不再落到裸日期；改格式时绝不拿另一个
+市场同日期条目（另一张照片）的名字来改名——条目按图像标识配对；
+曾经落成裸名 `yyyyMMdd.jpg` 的文件，会在后续更新时重新解析并改名。
 
 ## Build / 构建
 

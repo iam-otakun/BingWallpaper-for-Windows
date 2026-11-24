@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
@@ -30,8 +31,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.5.0")]
-[assembly: AssemblyFileVersion("1.0.5.0")]
+[assembly: AssemblyVersion("1.0.6.0")]
+[assembly: AssemblyFileVersion("1.0.6.0")]
 
 namespace BingWallpaperWin
 {
@@ -61,6 +62,7 @@ namespace BingWallpaperWin
         public string Copyright { get; set; }
         public string CopyrightLink { get; set; }
         public string Title { get; set; }
+        public string Key { get; set; }            // OHR image key of the downloaded photo (null in pre-1.0.6 indexes)
     }
 
     public enum FileNameFormat
@@ -159,6 +161,18 @@ namespace BingWallpaperWin
                 return DateTime.MinValue;
             }
             set { SetString("LastUpdate", value.ToString("o", CultureInfo.InvariantCulture)); }
+        }
+
+        public static DateTime LastAppCheck
+        {
+            get
+            {
+                string s = GetString("LastAppCheck", "");
+                DateTime dt;
+                if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out dt)) return dt;
+                return DateTime.MinValue;
+            }
+            set { SetString("LastAppCheck", value.ToString("o", CultureInfo.InvariantCulture)); }
         }
 
         public static bool LaunchAtLogin
@@ -303,7 +317,7 @@ namespace BingWallpaperWin
             }
         }
 
-        private static async Task<byte[]> DownloadBinary(string url)
+        public static async Task<byte[]> DownloadBinary(string url)
         {
             using (HttpClient client = MakeClient())
             {
@@ -380,6 +394,15 @@ namespace BingWallpaperWin
             return null;
         }
 
+        // Last-resort name from the primary feed's own metadata for this
+        // image: a real title in the exit market's language still beats
+        // a bare date, and Update() heals it to the format's proper
+        // name on a later run once the market feeds cooperate.
+        private static string OwnName(BingImage entry)
+        {
+            return BuildName(entry.startdate, Keywords(entry.copyright));
+        }
+
         // Resolve the display file name for an entry, following the user's
         // naming format. Falls back to <startdate>.jpg whenever the market
         // metadata cannot be fetched or matched, so naming never fails a
@@ -388,15 +411,19 @@ namespace BingWallpaperWin
         {
             string fallback = entry.startdate + ".jpg";
             string key = ImageKey(entry.url);
-            if (key == null) return fallback;
+            if (key == null) return OwnName(entry);
             try
             {
+                // The name's date is always the entry's own date (the one
+                // the index knows it by); only the keywords come from the
+                // matched market entry — markets label the same photo
+                // with different dates around their local midnights.
                 if (format == FileNameFormat.English)
                 {
                     List<BingImage> en = await FetchEntries(8, "en-US").ConfigureAwait(false);
                     BingImage m = Match(en, key);
-                    if (m == null) return fallback;
-                    return BuildName(m.startdate, Keywords(m.copyright));
+                    if (m == null) return OwnName(entry);
+                    return BuildName(entry.startdate, Keywords(m.copyright));
                 }
                 else if (format == FileNameFormat.Bilingual)
                 {
@@ -404,42 +431,42 @@ namespace BingWallpaperWin
                     Task<List<BingImage>> tZh = FetchEntries(9, "zh-CN");
                     List<BingImage> en = await tEn.ConfigureAwait(false);
                     List<BingImage> zh = await tZh.ConfigureAwait(false);
+                    // The two markets are matched independently: each one
+                    // runs its own editorial selection, so a photo the
+                    // exit market shows may exist in only one of them
+                    // (e.g. the 2026-11-23 Cairngorms squirrel ran in the
+                    // zh-CN and ja-JP selections but never in en-US).
+                    // Requiring the en-US match first sent exactly those
+                    // photos to the bare-date fallback.
                     BingImage enEntry = Match(en, key);
-                    if (enEntry == null) return fallback;
-                    string kwEn = Keywords(enEntry.copyright);
                     BingImage zhEntry = Match(zh, key);
-                    if (zhEntry != null)
-                    {
-                        // Date and Chinese keywords from the Chinese-market
-                        // entry for this very image; English keywords follow
-                        // after a hyphen (the Synology archive's rule).
-                        string kwZh = Keywords(zhEntry.copyright);
-                        // Bing steers by exit IP: from a CN exit the en-US
-                        // request is answered with zh-CN metadata anyway
-                        // (verified on a CN-exit host: identical OHR id and
-                        // copyright). Identical keywords mean no English
-                        // metadata was really delivered — drop the segment
-                        // instead of duplicating the Chinese one.
-                        if (kwEn == kwZh) kwEn = "";
-                        string name = "Bing_" + DashedDate(zhEntry.startdate);
-                        if (!string.IsNullOrEmpty(kwZh)) name += "_" + kwZh;
-                        if (!string.IsNullOrEmpty(kwEn)) name += string.IsNullOrEmpty(kwZh) ? "_" + kwEn : "-" + kwEn;
-                        return name + ".jpg";
-                    }
-                    return BuildName(enEntry.startdate, kwEn);
+                    if (enEntry == null && zhEntry == null) return OwnName(entry);
+                    string kwEn = enEntry != null ? Keywords(enEntry.copyright) : "";
+                    string kwZh = zhEntry != null ? Keywords(zhEntry.copyright) : "";
+                    // Bing steers by exit IP: from a CN exit the en-US
+                    // request is answered with zh-CN metadata anyway
+                    // (verified on a CN-exit host: identical OHR id and
+                    // copyright). Identical keywords mean no English
+                    // metadata was really delivered — drop the segment
+                    // instead of duplicating the Chinese one.
+                    if (kwEn == kwZh) kwEn = "";
+                    string name = "Bing_" + DashedDate(entry.startdate);
+                    if (!string.IsNullOrEmpty(kwZh)) name += "_" + kwZh;
+                    if (!string.IsNullOrEmpty(kwEn)) name += string.IsNullOrEmpty(kwZh) ? "_" + kwEn : "-" + kwEn;
+                    return name + ".jpg";
                 }
                 else
                 {
                     List<BingImage> local = await FetchEntries(8, LocalMarket()).ConfigureAwait(false);
                     BingImage m = Match(local, key);
-                    if (m == null) return fallback;
-                    return BuildName(m.startdate, Keywords(m.copyright));
+                    if (m == null) return OwnName(entry);
+                    return BuildName(entry.startdate, Keywords(m.copyright));
                 }
             }
             catch (Exception ex)
             {
                 Log("ResolveFileName failed for " + entry.startdate + ": " + ex.Message);
-                return fallback;
+                return OwnName(entry);
             }
         }
 
@@ -471,6 +498,7 @@ namespace BingWallpaperWin
                     var created = new IndexEntry();
                     created.StartDate = e.startdate;
                     created.FileName = null;
+                    created.Key = ImageKey(e.url);
                     created.Copyright = e.copyright;
                     created.CopyrightLink = e.copyrightlink;
                     created.Title = e.title;
@@ -481,6 +509,12 @@ namespace BingWallpaperWin
                     existing.Copyright = e.copyright;
                     existing.CopyrightLink = e.copyrightlink;
                     existing.Title = e.title;
+                    // Backfill the image key for entries written before
+                    // 1.0.6. The primary feed is the same market these
+                    // photos were downloaded from, so its same-date entry
+                    // is the same photo (the trust this loop already
+                    // places in the copyright refresh above).
+                    if (string.IsNullOrEmpty(existing.Key)) existing.Key = ImageKey(e.url);
                 }
             }
 
@@ -518,6 +552,35 @@ namespace BingWallpaperWin
                 {
                     Log("Download failed for " + e.startdate + ": " + ex.Message);
                 }
+            }
+
+            // Heal names that fell back to a bare <startdate>.jpg at
+            // download time (the market feeds were unreachable or had
+            // not caught up then): re-resolve them now and rename the
+            // files, so a first-run fallback does not stay bare forever.
+            foreach (BingImage e in entries)
+            {
+                IndexEntry ie = Find(index, e.startdate);
+                if (ie == null) continue;
+                if (ie.FileName != ie.StartDate + ".jpg") continue;
+                if (!IsOnDisk(ie)) continue;
+                string healed = await ResolveFileName(e, Settings.Format).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(healed) || healed == ie.FileName) continue;
+                string oldPath = Path.Combine(SaveDir, ie.FileName);
+                string newPath = Path.Combine(SaveDir, healed);
+                try
+                {
+                    if (File.Exists(newPath)) continue;
+                    File.Move(oldPath, newPath);
+                }
+                catch (Exception ex)
+                {
+                    Log("Name heal rename failed for " + ie.StartDate + ": " + ex.Message);
+                    continue;
+                }
+                ie.FileName = healed;
+                Log("Name healed for " + ie.StartDate + ": " + healed);
+                if (ie.StartDate == Settings.CurrentStartDate) SetWallpaper(newPath);
             }
 
             SaveIndex(index);
@@ -571,12 +634,35 @@ namespace BingWallpaperWin
             foreach (IndexEntry ie in index)
             {
                 if (!IsOnDisk(ie)) continue;
+                // Match the format market's entry to this index entry.
+                // When the entry knows its photo's image key, match by
+                // key and skip when the market does not carry the photo:
+                // each market runs its own selection, so a same-date
+                // entry there can be a DIFFERENT photo, and borrowing
+                // its name would mislabel this file. Keyless entries
+                // (written before 1.0.6) keep the historical date match.
                 BingImage fresh = null;
-                foreach (BingImage e in primary)
-                    if (e.startdate == ie.StartDate) { fresh = e; break; }
-                if (fresh == null) continue;
+                if (!string.IsNullOrEmpty(ie.Key))
+                {
+                    foreach (BingImage e in primary)
+                        if (ImageKey(e.url) == ie.Key) { fresh = e; break; }
+                    if (fresh == null) continue;
+                }
+                else
+                {
+                    foreach (BingImage e in primary)
+                        if (e.startdate == ie.StartDate) { fresh = e; break; }
+                    if (fresh == null) continue;
+                }
 
-                string newName = await ResolveFileName(fresh, format).ConfigureAwait(false);
+                // Resolve under the index entry's own date: the fresh
+                // entry supplies the photo's key and metadata, but the
+                // name must carry the date this archive knows it by.
+                var named = new BingImage();
+                named.startdate = ie.StartDate;
+                named.url = fresh.url;
+                named.copyright = fresh.copyright;
+                string newName = await ResolveFileName(named, format).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(newName) || newName == ie.FileName)
                 {
                     // Name already fits the format; still refresh the
@@ -696,6 +782,181 @@ namespace BingWallpaperWin
         [PreserveSig] int GetMonitorDevicePathCount(out uint count);
     }
 
+    public class ReleaseInfo
+    {
+        public string Tag;
+        public Version Version;
+        public string ZipUrl;
+    }
+
+    // ------------------------------------------------------------------
+    // Self-update from GitHub Releases: check the latest release of
+    // iam-otakun/BingWallpaper-for-Windows, download its zip, then swap
+    // the running exe (rename it to .old, copy the new one in, relaunch
+    // with --updated so the new instance waits for the old one's mutex).
+    // Any failure before the swap leaves the install untouched.
+    // ------------------------------------------------------------------
+
+    public static class AppUpdate
+    {
+        private const string LatestUrl = "https://api.github.com/repos/iam-otakun/BingWallpaper-for-Windows/releases/latest";
+
+        public static Version CurrentVersion
+        {
+            get { return Assembly.GetExecutingAssembly().GetName().Version; }
+        }
+
+        public static async Task<ReleaseInfo> FetchLatest()
+        {
+            try
+            {
+                string json;
+                using (var client = new HttpClient())
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, LatestUrl);
+                    req.Headers.TryAddWithoutValidation("User-Agent", "BingWallpaper-Windows/" + CurrentVersion.ToString());
+                    req.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+                    HttpResponseMessage resp = await client.SendAsync(req).ConfigureAwait(false);
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        Core.Log("Update check failed: HTTP " + (int)resp.StatusCode);
+                        return null;
+                    }
+                    json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                }
+                var ser = new JavaScriptSerializer();
+                var root = ser.Deserialize<Dictionary<string, object>>(json);
+                object tagObj;
+                if (!root.TryGetValue("tag_name", out tagObj)) return null;
+                string tag = tagObj as string;
+                if (string.IsNullOrEmpty(tag)) return null;
+                Version ver;
+                if (!Version.TryParse(tag.TrimStart('v', 'V'), out ver)) return null;
+                string zip = null;
+                object assetsObj;
+                if (root.TryGetValue("assets", out assetsObj))
+                {
+                    var assets = assetsObj as System.Collections.ArrayList;
+                    if (assets != null)
+                    {
+                        foreach (object a in assets)
+                        {
+                            var d = a as Dictionary<string, object>;
+                            if (d == null) continue;
+                            object nameObj, urlObj;
+                            string name = d.TryGetValue("name", out nameObj) ? nameObj as string : null;
+                            if (name != null
+                                && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                                && d.TryGetValue("browser_download_url", out urlObj))
+                            {
+                                zip = urlObj as string;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (zip == null) return null;
+                var info = new ReleaseInfo();
+                info.Tag = tag;
+                info.Version = ver;
+                info.ZipUrl = zip;
+                return info;
+            }
+            catch (Exception ex)
+            {
+                Core.Log("Update check failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        // Download the release zip and extract the new exe into the
+        // state dir; returns the staged exe path, or null on failure.
+        public static async Task<string> Stage(ReleaseInfo rel)
+        {
+            try
+            {
+                string dir = Path.Combine(Core.StateDir, "update");
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                byte[] zipBytes = await Core.DownloadBinary(rel.ZipUrl).ConfigureAwait(false);
+                string zipPath = Path.Combine(dir, "pkg.zip");
+                File.WriteAllBytes(zipPath, zipBytes);
+                string extract = Path.Combine(dir, "extract");
+                ZipFile.ExtractToDirectory(zipPath, extract);
+                string exe = FindExe(extract);
+                if (exe == null)
+                {
+                    Core.Log("Update package has no BingWallpaper.exe");
+                    return null;
+                }
+                var fi = new FileInfo(exe);
+                if (fi.Length < 50000)
+                {
+                    Core.Log("Staged exe looks too small: " + fi.Length);
+                    return null;
+                }
+                return exe;
+            }
+            catch (Exception ex)
+            {
+                Core.Log("Update staging failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static string FindExe(string dir)
+        {
+            string direct = Path.Combine(dir, "BingWallpaper.exe");
+            if (File.Exists(direct)) return direct;
+            foreach (string f in Directory.GetFiles(dir, "BingWallpaper.exe", SearchOption.AllDirectories))
+                return f;
+            return null;
+        }
+
+        // A running exe can be renamed but not overwritten: move the
+        // current one to .old, copy the staged one into its place and
+        // relaunch. If the copy fails, the .old is moved back first.
+        public static bool SwapAndRelaunch(string stagedExe)
+        {
+            string exePath = Application.ExecutablePath;
+            string oldPath = exePath + ".old";
+            try
+            {
+                if (File.Exists(oldPath)) File.Delete(oldPath);
+                File.Move(exePath, oldPath);
+                try
+                {
+                    File.Copy(stagedExe, exePath);
+                }
+                catch
+                {
+                    File.Move(oldPath, exePath);
+                    throw;
+                }
+                System.Diagnostics.Process.Start(exePath, "--updated");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Core.Log("Update swap failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        // Remove the previous exe and any staged leftovers at startup.
+        public static void CleanupOld()
+        {
+            try
+            {
+                string oldPath = Application.ExecutablePath + ".old";
+                if (File.Exists(oldPath)) File.Delete(oldPath);
+                string dir = Path.Combine(Core.StateDir, "update");
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            }
+            catch { }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Tray application — mirrors MenuController: preview title, Open
     // Photo Folder, Refresh Images (with feedback), previous/next day,
@@ -709,6 +970,9 @@ namespace BingWallpaperWin
         private ToolStripMenuItem titleItem;
         private ToolStripMenuItem refreshItem;
         private ToolStripMenuItem stickItem;
+        private ToolStripMenuItem updateItem;
+        private ReleaseInfo pendingUpdate;
+        private bool checkingUpdate;
         private System.Windows.Forms.Timer timer;
         private bool updating;
 
@@ -720,6 +984,16 @@ namespace BingWallpaperWin
             catch { tray.Icon = SystemIcons.Application; }
             tray.Visible = true;
             tray.DoubleClick += delegate { OpenPhotoFolder(); };
+            tray.BalloonTipClicked += delegate
+            {
+                if (pendingUpdate != null)
+                {
+                    if (MessageBox.Show("Download and install BingWallpaper " + pendingUpdate.Tag + " now? The app will restart.", "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    {
+                        var ignored = InstallUpdate();
+                    }
+                }
+            };
 
             var menu = new ContextMenuStrip();
             titleItem = new ToolStripMenuItem("(no image yet)");
@@ -760,6 +1034,10 @@ namespace BingWallpaperWin
             settingsItem.Click += delegate { ShowSettings(); };
             menu.Items.Add(settingsItem);
 
+            updateItem = new ToolStripMenuItem("Check for Updates…");
+            updateItem.Click += async delegate { await CheckForUpdates(true); };
+            menu.Items.Add(updateItem);
+
             var quitItem = new ToolStripMenuItem("Quit");
             quitItem.Click += delegate { ExitThread(); };
             menu.Items.Add(quitItem);
@@ -785,6 +1063,15 @@ namespace BingWallpaperWin
                 }
             };
             timer.Start();
+
+            // Self-update: clear the previous exe left by a swap, then
+            // quietly check GitHub at most once a day; a balloon offers
+            // the update when one exists.
+            AppUpdate.CleanupOld();
+            if (DateTime.Now - Settings.LastAppCheck > TimeSpan.FromHours(20))
+            {
+                var ignoredCheck = CheckForUpdates(false);
+            }
         }
 
         protected override void ExitThreadCore()
@@ -850,8 +1137,23 @@ namespace BingWallpaperWin
             }
         }
 
+        // Browsing away from the pinned picture releases the pin: a
+        // Previous / Next / Today click means "show me another day",
+        // so Stick turns itself off and the wallpaper and the title
+        // follow the click. (The incoherent state — state moved, pin
+        // still on, wallpaper unmoved — is what must never happen.)
+        private void ReleaseStickForBrowsing()
+        {
+            if (Settings.StickEnabled)
+            {
+                Settings.StickEnabled = false;
+                stickItem.Checked = false;
+            }
+        }
+
         private void StepDay(int delta)
         {
+            ReleaseStickForBrowsing();
             List<IndexEntry> index = Core.LoadIndex();
             List<IndexEntry> onDisk = Core.OnDiskEntries(index);
             if (onDisk.Count == 0) return;
@@ -869,6 +1171,7 @@ namespace BingWallpaperWin
 
         private void JumpToToday()
         {
+            ReleaseStickForBrowsing();
             List<IndexEntry> index = Core.LoadIndex();
             List<IndexEntry> onDisk = Core.OnDiskEntries(index);
             if (onDisk.Count == 0) return;
@@ -938,15 +1241,92 @@ namespace BingWallpaperWin
             }
         }
 
+        private async Task CheckForUpdates(bool interactive)
+        {
+            if (checkingUpdate) return;
+            checkingUpdate = true;
+            try
+            {
+                ReleaseInfo rel = await AppUpdate.FetchLatest();
+                if (rel == null)
+                {
+                    if (interactive)
+                        MessageBox.Show("Could not check for updates. Please try again later.", "BingWallpaper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                Settings.LastAppCheck = DateTime.Now;
+                Version cur = AppUpdate.CurrentVersion;
+                if (rel.Version > cur)
+                {
+                    pendingUpdate = rel;
+                    updateItem.Text = "Update to " + rel.Tag + "…";
+                    if (interactive)
+                    {
+                        if (MessageBox.Show("BingWallpaper " + rel.Tag + " is available (you have v" + cur.ToString(3) + ").\n\nDownload and install it now? The app will restart.", "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                        {
+                            await InstallUpdate();
+                        }
+                    }
+                    else
+                    {
+                        tray.BalloonTipTitle = "BingWallpaper update";
+                        tray.BalloonTipText = "Version " + rel.Tag + " is available. Click to update.";
+                        tray.BalloonTipIcon = ToolTipIcon.Info;
+                        tray.ShowBalloonTip(8000);
+                    }
+                }
+                else if (interactive)
+                {
+                    MessageBox.Show("BingWallpaper is up to date (v" + cur.ToString(3) + ").", "Check for Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex) { Core.Log("CheckForUpdates failed: " + ex.Message); }
+            finally { checkingUpdate = false; }
+        }
+
+        private async Task InstallUpdate()
+        {
+            if (pendingUpdate == null) return;
+            updateItem.Enabled = false;
+            try
+            {
+                tray.BalloonTipTitle = "BingWallpaper";
+                tray.BalloonTipText = "Downloading update " + pendingUpdate.Tag + "…";
+                tray.BalloonTipIcon = ToolTipIcon.Info;
+                tray.ShowBalloonTip(4000);
+                string staged = await AppUpdate.Stage(pendingUpdate);
+                if (staged == null)
+                {
+                    MessageBox.Show("The update could not be downloaded. Please try again later, or download it from GitHub.", "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (AppUpdate.SwapAndRelaunch(staged))
+                {
+                    ExitThread();
+                }
+                else
+                {
+                    MessageBox.Show("The update could not be installed. Your current version is untouched.", "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex) { Core.Log("InstallUpdate failed: " + ex.Message); }
+            finally { updateItem.Enabled = true; }
+        }
+
         private void ShowSettings()
         {
-            FileNameFormat before = Settings.Format;
             DialogResult result;
             using (var form = new SettingsForm())
             {
                 result = form.ShowDialog();
             }
-            if (result == DialogResult.OK && Settings.Format != before)
+            // Apply the chosen format on every OK, not only when the
+            // value changed: re-applying is what heals archive names
+            // that never matched the format (a first-run fallback name,
+            // a photo renamed under another market's selection), and
+            // the user pressing OK with a format selected means
+            // "make the names follow this format".
+            if (result == DialogResult.OK)
             {
                 var ignored = ReformatAfterSettingsChange();
             }
@@ -1103,13 +1483,26 @@ namespace BingWallpaperWin
         static int Main(string[] args)
         {
             bool selftest = false;
+            bool updated = false;
             foreach (string a in args)
+            {
                 if (a == "--selftest") selftest = true;
+                if (a == "--updated") updated = true;
+            }
 
             if (selftest) return RunSelfTest();
 
-            bool createdNew;
-            var mutex = new Mutex(true, "BingWallpaperForWindows", out createdNew);
+            // After a self-update swap the previous instance may still
+            // be exiting: wait for its mutex instead of giving up.
+            bool createdNew = false;
+            Mutex mutex = null;
+            int attempts = updated ? 50 : 1;
+            for (int i = 0; i < attempts && !createdNew; i++)
+            {
+                if (i > 0) Thread.Sleep(200);
+                mutex = new Mutex(true, "BingWallpaperForWindows", out createdNew);
+                if (!createdNew) { mutex.Dispose(); mutex = null; }
+            }
             if (!createdNew) return 0; // already running
 
             Application.EnableVisualStyles();

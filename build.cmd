@@ -15,6 +15,8 @@ if not exist "%CSC%" (
   /reference:System.Drawing.dll ^
   /reference:System.Net.Http.dll ^
   /reference:System.Web.Extensions.dll ^
+  /reference:System.IO.Compression.dll ^
+  /reference:System.IO.Compression.FileSystem.dll ^
   BingWallpaper.cs
 if errorlevel 1 (
   echo BUILD FAILED
