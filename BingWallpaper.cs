@@ -1,0 +1,1027 @@
+// BingWallpaper for Windows
+// A system-tray app that downloads the Bing daily wallpapers, archives them
+// under Pictures\bing-wallpapers and sets the newest one as the desktop
+// wallpaper. It is the Windows sibling of BingWallpaper-for-Mac and mirrors
+// its architecture: tray-resident, fetch 8 archive entries from Bing's
+// HPImageArchive API, download only the images not yet on disk (UHD),
+// resolve file names from market metadata (English / bilingual / local),
+// keep a small index of what was downloaded, prune old images, and give
+// the user explicit feedback on a manual refresh.
+//
+// Single-file C# (C# 5, .NET Framework 4.8), built with the framework's
+// csc.exe — the same recipe as our NetworkSwitch tool. No SDK, no NuGet.
+//
+// Idea by Fred (Otakun), code by Dash.
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+using System.Windows.Forms;
+using Microsoft.Win32;
+
+[assembly: AssemblyTitle("BingWallpaper")]
+[assembly: AssemblyProduct("BingWallpaper for Windows")]
+[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyFileVersion("1.0.2.0")]
+
+namespace BingWallpaperWin
+{
+    // ------------------------------------------------------------------
+    // Data model (mirrors the macOS ImageDescriptor + stored file names)
+    // ------------------------------------------------------------------
+
+    public class BingImage
+    {
+        public string url { get; set; }
+        public string startdate { get; set; }
+        public string enddate { get; set; }
+        public string copyright { get; set; }
+        public string copyrightlink { get; set; }
+        public string title { get; set; }
+    }
+
+    public class BingArchive
+    {
+        public List<BingImage> images { get; set; }
+    }
+
+    public class IndexEntry
+    {
+        public string StartDate { get; set; }      // yyyyMMdd
+        public string FileName { get; set; }       // resolved on-disk name
+        public string Copyright { get; set; }
+        public string CopyrightLink { get; set; }
+        public string Title { get; set; }
+    }
+
+    public enum FileNameFormat
+    {
+        English = 0,
+        Bilingual = 1,
+        Local = 2
+    }
+
+    public enum UpdateOutcome
+    {
+        Updated,
+        UpToDate,
+        Failed
+    }
+
+    // ------------------------------------------------------------------
+    // Settings (HKCU\Software\BingWallpaper) — mirrors macOS Settings
+    // ------------------------------------------------------------------
+
+    static class Settings
+    {
+        private const string KeyPath = @"Software\BingWallpaper";
+        private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string RunValueName = "BingWallpaper";
+
+        private static int GetInt(string name, int fallback)
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath))
+            {
+                if (key == null) return fallback;
+                object v = key.GetValue(name);
+                if (v is int) return (int)v;
+                return fallback;
+            }
+        }
+
+        private static void SetInt(string name, int value)
+        {
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(KeyPath))
+            {
+                key.SetValue(name, value, RegistryValueKind.DWord);
+            }
+        }
+
+        private static string GetString(string name, string fallback)
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath))
+            {
+                if (key == null) return fallback;
+                string v = key.GetValue(name) as string;
+                return v ?? fallback;
+            }
+        }
+
+        private static void SetString(string name, string value)
+        {
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(KeyPath))
+            {
+                key.SetValue(name, value ?? "", RegistryValueKind.String);
+            }
+        }
+
+        public static FileNameFormat Format
+        {
+            get { return (FileNameFormat)GetInt("FileNameFormat", (int)FileNameFormat.Bilingual); }
+            set { SetInt("FileNameFormat", (int)value); }
+        }
+
+        // 5 / 10 / 50 / 100 days, or 0 = keep forever (macOS KeepImageDuration)
+        public static int KeepDays
+        {
+            get { return GetInt("KeepDays", 50); }
+            set { SetInt("KeepDays", value); }
+        }
+
+        public static string CurrentStartDate
+        {
+            get { return GetString("CurrentStartDate", ""); }
+            set { SetString("CurrentStartDate", value); }
+        }
+
+        public static DateTime LastUpdate
+        {
+            get
+            {
+                string s = GetString("LastUpdate", "");
+                DateTime dt;
+                if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out dt)) return dt;
+                return DateTime.MinValue;
+            }
+            set { SetString("LastUpdate", value.ToString("o", CultureInfo.InvariantCulture)); }
+        }
+
+        public static bool LaunchAtLogin
+        {
+            get
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKeyPath))
+                {
+                    if (key == null) return false;
+                    return key.GetValue(RunValueName) != null;
+                }
+            }
+            set
+            {
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath))
+                {
+                    if (value)
+                        key.SetValue(RunValueName, "\"" + Application.ExecutablePath + "\"", RegistryValueKind.String);
+                    else
+                        key.DeleteValue(RunValueName, false);
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Core: fetch, name, download, index, wallpaper — mirrors the macOS
+    // DownloadManager / FileNameResolver / UpdateManager / FileHandler.
+    // ------------------------------------------------------------------
+
+    static class Core
+    {
+        public static string SaveDir
+        {
+            get
+            {
+                string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                return Path.Combine(pictures, "bing-wallpapers");
+            }
+        }
+
+        public static string StateDir
+        {
+            get
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "BingWallpaper");
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                return dir;
+            }
+        }
+
+        private static string IndexPath { get { return Path.Combine(StateDir, "index.json"); } }
+        private static string LogPath { get { return Path.Combine(StateDir, "BingWallpaper.log"); } }
+
+        public static void Log(string message)
+        {
+            try
+            {
+                File.AppendAllText(LogPath,
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                    + " " + message + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        // ---------------- index ----------------
+
+        public static List<IndexEntry> LoadIndex()
+        {
+            try
+            {
+                if (File.Exists(IndexPath))
+                {
+                    string json = File.ReadAllText(IndexPath);
+                    var ser = new JavaScriptSerializer();
+                    List<IndexEntry> list = ser.Deserialize<List<IndexEntry>>(json);
+                    if (list != null) return list;
+                }
+            }
+            catch (Exception ex) { Log("LoadIndex failed: " + ex.Message); }
+            return new List<IndexEntry>();
+        }
+
+        public static void SaveIndex(List<IndexEntry> index)
+        {
+            try
+            {
+                var ser = new JavaScriptSerializer();
+                File.WriteAllText(IndexPath, ser.Serialize(index));
+            }
+            catch (Exception ex) { Log("SaveIndex failed: " + ex.Message); }
+        }
+
+        public static IndexEntry Find(List<IndexEntry> index, string startDate)
+        {
+            foreach (IndexEntry e in index)
+                if (e.StartDate == startDate) return e;
+            return null;
+        }
+
+        public static bool IsOnDisk(IndexEntry e)
+        {
+            if (e == null || string.IsNullOrEmpty(e.FileName)) return false;
+            return File.Exists(Path.Combine(SaveDir, e.FileName));
+        }
+
+        public static List<IndexEntry> OnDiskEntries(List<IndexEntry> index)
+        {
+            var list = new List<IndexEntry>();
+            foreach (IndexEntry e in index)
+                if (IsOnDisk(e)) list.Add(e);
+            list.Sort(delegate(IndexEntry a, IndexEntry b) { return string.Compare(a.StartDate, b.StartDate, StringComparison.Ordinal); });
+            return list;
+        }
+
+        // ---------------- HTTP ----------------
+
+        private static HttpClient MakeClient()
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            var client = new HttpClient();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) BingWallpaper/1.0");
+            client.Timeout = TimeSpan.FromSeconds(60);
+            return client;
+        }
+
+        public static async Task<List<BingImage>> FetchEntries(int count, string market)
+        {
+            string url = "https://www.bing.com/HPImageArchive.aspx?format=js&n="
+                + count.ToString(CultureInfo.InvariantCulture) + "&idx=0";
+            if (!string.IsNullOrEmpty(market)) url += "&mkt=" + market;
+            using (HttpClient client = MakeClient())
+            {
+                string json = await client.GetStringAsync(url).ConfigureAwait(false);
+                var ser = new JavaScriptSerializer();
+                BingArchive archive = ser.Deserialize<BingArchive>(json);
+                if (archive == null || archive.images == null) return new List<BingImage>();
+                return archive.images;
+            }
+        }
+
+        private static async Task<byte[]> DownloadBinary(string url)
+        {
+            using (HttpClient client = MakeClient())
+            {
+                return await client.GetByteArrayAsync(url).ConfigureAwait(false);
+            }
+        }
+
+        public static string ImageUrl(BingImage entry)
+        {
+            return "https://www.bing.com" + entry.url.Replace("1920x1080", "UHD");
+        }
+
+        // ---------------- file-name resolution (port of FileNameResolver) ----------------
+
+        public static string ImageKey(string url)
+        {
+            if (url == null) return null;
+            int i = url.IndexOf("OHR.", StringComparison.Ordinal);
+            if (i < 0) return null;
+            string rest = url.Substring(i + 4);
+            int u = rest.IndexOf('_');
+            string key = u >= 0 ? rest.Substring(0, u) : rest;
+            return key.Length == 0 ? null : key;
+        }
+
+        public static string Keywords(string copyright)
+        {
+            if (string.IsNullOrEmpty(copyright)) return "";
+            char[] disallowed = new char[] { '(', ')', '\\', '/', ':', '*', '?', '"', '<', '>' };
+            string[] parts = copyright.Split(disallowed);
+            string head = "";
+            foreach (string p in parts)
+            {
+                if (p.Length > 0) { head = p; break; }
+            }
+            string result = head.Replace('，', '_').Replace(',', '_').Replace(' ', '_');
+            while (result.Contains("__")) result = result.Replace("__", "_");
+            return result.Trim('_');
+        }
+
+        private static string DashedDate(string startdate)
+        {
+            if (startdate == null || startdate.Length != 8) return startdate;
+            return startdate.Substring(0, 4) + "-" + startdate.Substring(4, 2) + "-" + startdate.Substring(6, 2);
+        }
+
+        private static string BuildName(string startdate, string keywords)
+        {
+            string name = "Bing_" + DashedDate(startdate);
+            if (!string.IsNullOrEmpty(keywords)) name += "_" + keywords;
+            return name + ".jpg";
+        }
+
+        public static string LocalMarket()
+        {
+            string name = CultureInfo.CurrentCulture.Name; // e.g. zh-CN, en-US
+            string[] known = new string[] {
+                "zh-CN","zh-TW","zh-HK","en-US","en-GB","en-AU","en-CA","en-IN","en-NZ",
+                "ja-JP","de-DE","fr-FR","fr-CA","es-ES","es-MX","it-IT","pt-BR","pt-PT",
+                "ko-KR","ru-RU","nl-NL","pl-PL","sv-SE","da-DK","nb-NO","fi-FI","tr-TR" };
+            foreach (string k in known)
+                if (string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) return k;
+            if (name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)) return "zh-CN";
+            return "en-US";
+        }
+
+        private static BingImage Match(List<BingImage> entries, string key)
+        {
+            foreach (BingImage e in entries)
+            {
+                if (ImageKey(e.url) == key) return e;
+                if (ImageKey("https://www.bing.com" + e.url) == key) return e;
+            }
+            return null;
+        }
+
+        // Resolve the display file name for an entry, following the user's
+        // naming format. Falls back to <startdate>.jpg whenever the market
+        // metadata cannot be fetched or matched, so naming never fails a
+        // download (same contract as the macOS resolver).
+        public static async Task<string> ResolveFileName(BingImage entry, FileNameFormat format)
+        {
+            string fallback = entry.startdate + ".jpg";
+            string key = ImageKey(entry.url);
+            if (key == null) return fallback;
+            try
+            {
+                if (format == FileNameFormat.English)
+                {
+                    List<BingImage> en = await FetchEntries(8, "en-US").ConfigureAwait(false);
+                    BingImage m = Match(en, key);
+                    if (m == null) return fallback;
+                    return BuildName(m.startdate, Keywords(m.copyright));
+                }
+                else if (format == FileNameFormat.Bilingual)
+                {
+                    Task<List<BingImage>> tEn = FetchEntries(8, "en-US");
+                    Task<List<BingImage>> tZh = FetchEntries(9, "zh-CN");
+                    List<BingImage> en = await tEn.ConfigureAwait(false);
+                    List<BingImage> zh = await tZh.ConfigureAwait(false);
+                    BingImage enEntry = Match(en, key);
+                    if (enEntry == null) return fallback;
+                    string kwEn = Keywords(enEntry.copyright);
+                    BingImage zhEntry = Match(zh, key);
+                    if (zhEntry != null)
+                    {
+                        // Date and Chinese keywords from the Chinese-market
+                        // entry for this very image; English keywords follow
+                        // after a hyphen (the Synology archive's rule).
+                        string kwZh = Keywords(zhEntry.copyright);
+                        // Bing steers by exit IP: from a CN exit the en-US
+                        // request is answered with zh-CN metadata anyway
+                        // (verified on a CN-exit host: identical OHR id and
+                        // copyright). Identical keywords mean no English
+                        // metadata was really delivered — drop the segment
+                        // instead of duplicating the Chinese one.
+                        if (kwEn == kwZh) kwEn = "";
+                        string name = "Bing_" + DashedDate(zhEntry.startdate);
+                        if (!string.IsNullOrEmpty(kwZh)) name += "_" + kwZh;
+                        if (!string.IsNullOrEmpty(kwEn)) name += string.IsNullOrEmpty(kwZh) ? "_" + kwEn : "-" + kwEn;
+                        return name + ".jpg";
+                    }
+                    return BuildName(enEntry.startdate, kwEn);
+                }
+                else
+                {
+                    List<BingImage> local = await FetchEntries(8, LocalMarket()).ConfigureAwait(false);
+                    BingImage m = Match(local, key);
+                    if (m == null) return fallback;
+                    return BuildName(m.startdate, Keywords(m.copyright));
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ResolveFileName failed for " + entry.startdate + ": " + ex.Message);
+                return fallback;
+            }
+        }
+
+        // ---------------- update flow (port of UpdateManager.update) ----------------
+
+        public static async Task<UpdateOutcome> Update()
+        {
+            List<BingImage> entries;
+            try
+            {
+                entries = await FetchEntries(8, null).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log("Fetch entries failed: " + ex.Message);
+                return UpdateOutcome.Failed;
+            }
+            if (entries.Count == 0) return UpdateOutcome.Failed;
+
+            if (!Directory.Exists(SaveDir)) Directory.CreateDirectory(SaveDir);
+            List<IndexEntry> index = LoadIndex();
+
+            // Merge fresh metadata into the index (the descriptor store).
+            foreach (BingImage e in entries)
+            {
+                IndexEntry existing = Find(index, e.startdate);
+                if (existing == null)
+                {
+                    var created = new IndexEntry();
+                    created.StartDate = e.startdate;
+                    created.FileName = null;
+                    created.Copyright = e.copyright;
+                    created.CopyrightLink = e.copyrightlink;
+                    created.Title = e.title;
+                    index.Add(created);
+                }
+                else
+                {
+                    existing.Copyright = e.copyright;
+                    existing.CopyrightLink = e.copyrightlink;
+                    existing.Title = e.title;
+                }
+            }
+
+            var newEntries = new List<BingImage>();
+            foreach (BingImage e in entries)
+            {
+                IndexEntry ie = Find(index, e.startdate);
+                if (!IsOnDisk(ie)) newEntries.Add(e);
+            }
+
+            int successes = 0;
+            foreach (BingImage e in newEntries)
+            {
+                try
+                {
+                    IndexEntry ie = Find(index, e.startdate);
+                    if (string.IsNullOrEmpty(ie.FileName))
+                    {
+                        ie.FileName = await ResolveFileName(e, Settings.Format).ConfigureAwait(false);
+                        SaveIndex(index); // remember the name first, like macOS
+                    }
+                    byte[] data = await DownloadBinary(ImageUrl(e)).ConfigureAwait(false);
+                    string path = Path.Combine(SaveDir, ie.FileName);
+                    if (!File.Exists(path))
+                    {
+                        // Write via a temp file so a partial download never
+                        // poses as a finished wallpaper.
+                        string tmp = path + ".part";
+                        File.WriteAllBytes(tmp, data);
+                        File.Move(tmp, path);
+                    }
+                    successes++;
+                }
+                catch (Exception ex)
+                {
+                    Log("Download failed for " + e.startdate + ": " + ex.Message);
+                }
+            }
+
+            SaveIndex(index);
+            Settings.LastUpdate = DateTime.Now;
+            Cleanup(index);
+            SaveIndex(index);
+
+            if (newEntries.Count == 0) return UpdateOutcome.UpToDate;
+            if (successes == 0) return UpdateOutcome.Failed;
+
+            List<IndexEntry> onDisk = OnDiskEntries(index);
+            if (onDisk.Count > 0)
+            {
+                IndexEntry newest = onDisk[onDisk.Count - 1];
+                SetWallpaper(Path.Combine(SaveDir, newest.FileName));
+                Settings.CurrentStartDate = newest.StartDate;
+            }
+            return UpdateOutcome.Updated;
+        }
+
+        private static void Cleanup(List<IndexEntry> index)
+        {
+            int keep = Settings.KeepDays;
+            if (keep <= 0) return; // keep forever
+            string threshold = DateTime.Today.AddDays(-keep).ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+            for (int i = index.Count - 1; i >= 0; i--)
+            {
+                IndexEntry e = index[i];
+                if (string.Compare(e.StartDate, threshold, StringComparison.Ordinal) <= 0)
+                {
+                    try
+                    {
+                        if (IsOnDisk(e)) File.Delete(Path.Combine(SaveDir, e.FileName));
+                    }
+                    catch (Exception ex) { Log("Cleanup delete failed: " + ex.Message); }
+                    index.RemoveAt(i);
+                }
+            }
+        }
+
+        // ---------------- wallpaper ----------------
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+
+        public static bool SetWallpaper(string path)
+        {
+            // Preferred: IDesktopWallpaper, per monitor (Windows 8+).
+            try
+            {
+                var dw = (IDesktopWallpaper)new DesktopWallpaperClass();
+                uint count = 0;
+                dw.GetMonitorDevicePathCount(out count);
+                if (count == 0)
+                {
+                    dw.SetWallpaper(null, path);
+                }
+                else
+                {
+                    for (uint i = 0; i < count; i++)
+                    {
+                        string monitorId = null;
+                        dw.GetMonitorDevicePathAt(i, out monitorId);
+                        dw.SetWallpaper(monitorId, path);
+                    }
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log("IDesktopWallpaper failed, falling back: " + ex.Message);
+            }
+            try
+            {
+                const int SPI_SETDESKWALLPAPER = 20;
+                const int SPIF_UPDATEINIFILE = 0x01;
+                const int SPIF_SENDWININICHANGE = 0x02;
+                return SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, path, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE);
+            }
+            catch (Exception ex)
+            {
+                Log("SystemParametersInfo failed: " + ex.Message);
+                return false;
+            }
+        }
+    }
+
+    // IDesktopWallpaper (partial declaration: only the leading methods, in
+    // vtable order, which are the ones this app calls).
+    [ComImport, Guid("C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD")]
+    class DesktopWallpaperClass { }
+
+    [ComImport, Guid("B92B56A9-8B55-4E14-9A89-0199BBB6F93B"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IDesktopWallpaper
+    {
+        [PreserveSig] int SetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID,
+                                       [MarshalAs(UnmanagedType.LPWStr)] string wallpaper);
+        [PreserveSig] int GetWallpaper([MarshalAs(UnmanagedType.LPWStr)] string monitorID,
+                                       [MarshalAs(UnmanagedType.LPWStr)] out string wallpaper);
+        [PreserveSig] int GetMonitorDevicePathAt(uint monitorIndex,
+                                                 [MarshalAs(UnmanagedType.LPWStr)] out string monitorID);
+        [PreserveSig] int GetMonitorDevicePathCount(out uint count);
+    }
+
+    // ------------------------------------------------------------------
+    // Tray application — mirrors MenuController: preview title, Open
+    // Photo Folder, Refresh Images (with feedback), previous/next day,
+    // Settings, Quit. A timer checks once in a while whether today's
+    // image is still missing (the UpdateScheduleManager role).
+    // ------------------------------------------------------------------
+
+    class TrayApp : ApplicationContext
+    {
+        private NotifyIcon tray;
+        private ToolStripMenuItem titleItem;
+        private ToolStripMenuItem refreshItem;
+        private System.Windows.Forms.Timer timer;
+        private bool updating;
+
+        public TrayApp()
+        {
+            tray = new NotifyIcon();
+            tray.Text = "BingWallpaper";
+            try { tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch { tray.Icon = SystemIcons.Application; }
+            tray.Visible = true;
+            tray.DoubleClick += delegate { OpenPhotoFolder(); };
+
+            var menu = new ContextMenuStrip();
+            titleItem = new ToolStripMenuItem("(no image yet)");
+            titleItem.Click += delegate { OpenCopyrightLink(); };
+            menu.Items.Add(titleItem);
+            menu.Items.Add(new ToolStripSeparator());
+
+            var openItem = new ToolStripMenuItem("Open Photo Folder");
+            openItem.Click += delegate { OpenPhotoFolder(); };
+            menu.Items.Add(openItem);
+
+            refreshItem = new ToolStripMenuItem("Refresh Images");
+            refreshItem.Click += async delegate { await RefreshWithFeedback(); };
+            menu.Items.Add(refreshItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            var prevItem = new ToolStripMenuItem("Previous Day");
+            prevItem.Click += delegate { StepDay(-1); };
+            menu.Items.Add(prevItem);
+            var nextItem = new ToolStripMenuItem("Next Day");
+            nextItem.Click += delegate { StepDay(1); };
+            menu.Items.Add(nextItem);
+
+            var todayItem = new ToolStripMenuItem("Today");
+            todayItem.Click += delegate { JumpToToday(); };
+            menu.Items.Add(todayItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            var settingsItem = new ToolStripMenuItem("Settings");
+            settingsItem.Click += delegate { ShowSettings(); };
+            menu.Items.Add(settingsItem);
+
+            var quitItem = new ToolStripMenuItem("Quit");
+            quitItem.Click += delegate { ExitThread(); };
+            menu.Items.Add(quitItem);
+
+            tray.ContextMenuStrip = menu;
+
+            RefreshTitle();
+            EnsureWallpaperCurrent();
+
+            // Startup: fetch if today's image is not here yet.
+            if (Settings.LastUpdate.Date < DateTime.Today)
+            {
+                var ignored = SilentUpdate();
+            }
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 30 * 60 * 1000;
+            timer.Tick += delegate
+            {
+                if (Settings.LastUpdate.Date < DateTime.Today)
+                {
+                    var ignored = SilentUpdate();
+                }
+            };
+            timer.Start();
+        }
+
+        protected override void ExitThreadCore()
+        {
+            if (timer != null) timer.Stop();
+            if (tray != null) { tray.Visible = false; tray.Dispose(); }
+            base.ExitThreadCore();
+        }
+
+        private IndexEntry CurrentEntry()
+        {
+            List<IndexEntry> index = Core.LoadIndex();
+            List<IndexEntry> onDisk = Core.OnDiskEntries(index);
+            if (onDisk.Count == 0) return null;
+            string cur = Settings.CurrentStartDate;
+            IndexEntry found = Core.Find(onDisk, cur);
+            return found ?? onDisk[onDisk.Count - 1];
+        }
+
+        private void RefreshTitle()
+        {
+            IndexEntry cur = CurrentEntry();
+            if (cur == null)
+            {
+                titleItem.Text = "(no image yet)";
+                return;
+            }
+            string head = Core.Keywords(cur.Copyright ?? "");
+            string text = string.IsNullOrEmpty(head) ? (cur.Title ?? cur.StartDate) : head.Replace('_', ' ');
+            titleItem.Text = text;
+            string trayText = "BingWallpaper - " + text;
+            if (trayText.Length >= 64) trayText = trayText.Substring(0, 63);
+            tray.Text = trayText;
+        }
+
+        private void EnsureWallpaperCurrent()
+        {
+            IndexEntry cur = CurrentEntry();
+            if (cur != null)
+            {
+                Core.SetWallpaper(Path.Combine(Core.SaveDir, cur.FileName));
+                Settings.CurrentStartDate = cur.StartDate;
+            }
+        }
+
+        private void OpenPhotoFolder()
+        {
+            try
+            {
+                if (!Directory.Exists(Core.SaveDir)) Directory.CreateDirectory(Core.SaveDir);
+                System.Diagnostics.Process.Start("explorer.exe", "\"" + Core.SaveDir + "\"");
+            }
+            catch (Exception ex) { Core.Log("OpenPhotoFolder failed: " + ex.Message); }
+        }
+
+        private void OpenCopyrightLink()
+        {
+            IndexEntry cur = CurrentEntry();
+            if (cur != null && !string.IsNullOrEmpty(cur.CopyrightLink))
+            {
+                try { System.Diagnostics.Process.Start(cur.CopyrightLink); }
+                catch (Exception ex) { Core.Log("OpenCopyrightLink failed: " + ex.Message); }
+            }
+        }
+
+        private void StepDay(int delta)
+        {
+            List<IndexEntry> index = Core.LoadIndex();
+            List<IndexEntry> onDisk = Core.OnDiskEntries(index);
+            if (onDisk.Count == 0) return;
+            int pos = onDisk.Count - 1;
+            string cur = Settings.CurrentStartDate;
+            for (int i = 0; i < onDisk.Count; i++)
+                if (onDisk[i].StartDate == cur) { pos = i; break; }
+            int next = pos + delta;
+            if (next < 0 || next >= onDisk.Count) return;
+            IndexEntry target = onDisk[next];
+            Core.SetWallpaper(Path.Combine(Core.SaveDir, target.FileName));
+            Settings.CurrentStartDate = target.StartDate;
+            RefreshTitle();
+        }
+
+        private void JumpToToday()
+        {
+            List<IndexEntry> index = Core.LoadIndex();
+            List<IndexEntry> onDisk = Core.OnDiskEntries(index);
+            if (onDisk.Count == 0) return;
+            IndexEntry newest = onDisk[onDisk.Count - 1];
+            Core.SetWallpaper(Path.Combine(Core.SaveDir, newest.FileName));
+            Settings.CurrentStartDate = newest.StartDate;
+            RefreshTitle();
+        }
+
+        private async Task SilentUpdate()
+        {
+            if (updating) return;
+            updating = true;
+            try
+            {
+                UpdateOutcome outcome = await Core.Update();
+                if (outcome == UpdateOutcome.Updated)
+                {
+                    RefreshTitle();
+                    tray.ShowBalloonTip(5000, "BingWallpaper", "New wallpaper set.", ToolTipIcon.Info);
+                }
+            }
+            catch (Exception ex) { Core.Log("SilentUpdate failed: " + ex.Message); }
+            finally { updating = false; }
+        }
+
+        private async Task RefreshWithFeedback()
+        {
+            if (updating) return;
+            updating = true;
+            refreshItem.Enabled = false;
+            try
+            {
+                UpdateOutcome outcome = await Core.Update();
+                RefreshTitle();
+                string message;
+                if (outcome == UpdateOutcome.Updated) message = "Update successfully!";
+                else if (outcome == UpdateOutcome.UpToDate) message = "Up to date!";
+                else message = "Update failed!";
+                MessageBox.Show(message, "BingWallpaper",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Core.Log("Refresh failed: " + ex.Message);
+                MessageBox.Show("Update failed!", "BingWallpaper",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            finally
+            {
+                updating = false;
+                refreshItem.Enabled = true;
+            }
+        }
+
+        private void ShowSettings()
+        {
+            using (var form = new SettingsForm())
+            {
+                form.ShowDialog();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Settings form — naming format, retention, launch at login
+    // ------------------------------------------------------------------
+
+    class SettingsForm : Form
+    {
+        private RadioButton rbEnglish;
+        private RadioButton rbBilingual;
+        private RadioButton rbLocal;
+        private ComboBox cbKeep;
+        private CheckBox ckLogin;
+        private Label lblFolder;
+
+        public SettingsForm()
+        {
+            Text = "BingWallpaper Settings";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterScreen;
+            Width = 430;
+            Height = 320;
+
+            var lblFormat = new Label();
+            lblFormat.Text = "File name format:";
+            lblFormat.Left = 16; lblFormat.Top = 16; lblFormat.Width = 380;
+            Controls.Add(lblFormat);
+
+            rbEnglish = new RadioButton();
+            rbEnglish.Text = "English name — Bing_2026-11-24_Fiddlehead_fern.jpg";
+            rbEnglish.Left = 32; rbEnglish.Top = 42; rbEnglish.Width = 380;
+            Controls.Add(rbEnglish);
+
+            rbBilingual = new RadioButton();
+            rbBilingual.Text = "Bilingual — Bing_2026-11-24_蕨菜_Fiddlehead_fern.jpg";
+            rbBilingual.Left = 32; rbBilingual.Top = 66; rbBilingual.Width = 380;
+            Controls.Add(rbBilingual);
+
+            rbLocal = new RadioButton();
+            rbLocal.Text = "Local language (system)";
+            rbLocal.Left = 32; rbLocal.Top = 90; rbLocal.Width = 380;
+            Controls.Add(rbLocal);
+
+            var lblKeep = new Label();
+            lblKeep.Text = "Keep images for:";
+            lblKeep.Left = 16; lblKeep.Top = 126; lblKeep.Width = 140;
+            Controls.Add(lblKeep);
+
+            cbKeep = new ComboBox();
+            cbKeep.DropDownStyle = ComboBoxStyle.DropDownList;
+            cbKeep.Left = 160; cbKeep.Top = 122; cbKeep.Width = 120;
+            cbKeep.Items.Add("5 days");
+            cbKeep.Items.Add("10 days");
+            cbKeep.Items.Add("50 days");
+            cbKeep.Items.Add("100 days");
+            cbKeep.Items.Add("Forever");
+            Controls.Add(cbKeep);
+
+            ckLogin = new CheckBox();
+            ckLogin.Text = "Launch at login";
+            ckLogin.Left = 16; ckLogin.Top = 160; ckLogin.Width = 380;
+            Controls.Add(ckLogin);
+
+            lblFolder = new Label();
+            lblFolder.Text = "Photos: " + Core.SaveDir;
+            lblFolder.Left = 16; lblFolder.Top = 192; lblFolder.Width = 380;
+            Controls.Add(lblFolder);
+
+            var btnFolder = new Button();
+            btnFolder.Text = "Open Photo Folder";
+            btnFolder.Left = 16; btnFolder.Top = 218; btnFolder.Width = 140;
+            btnFolder.Click += delegate
+            {
+                try
+                {
+                    if (!Directory.Exists(Core.SaveDir)) Directory.CreateDirectory(Core.SaveDir);
+                    System.Diagnostics.Process.Start("explorer.exe", "\"" + Core.SaveDir + "\"");
+                }
+                catch { }
+            };
+            Controls.Add(btnFolder);
+
+            var btnOk = new Button();
+            btnOk.Text = "OK";
+            btnOk.Left = 232; btnOk.Top = 218; btnOk.Width = 80;
+            btnOk.Click += delegate { SaveAndClose(); };
+            Controls.Add(btnOk);
+
+            var btnCancel = new Button();
+            btnCancel.Text = "Cancel";
+            btnCancel.Left = 324; btnCancel.Top = 218; btnCancel.Width = 80;
+            btnCancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(btnCancel);
+            CancelButton = btnCancel;
+
+            LoadValues();
+        }
+
+        private void LoadValues()
+        {
+            FileNameFormat f = Settings.Format;
+            rbEnglish.Checked = f == FileNameFormat.English;
+            rbBilingual.Checked = f == FileNameFormat.Bilingual;
+            rbLocal.Checked = f == FileNameFormat.Local;
+            int keep = Settings.KeepDays;
+            cbKeep.SelectedIndex = keep == 5 ? 0 : keep == 10 ? 1 : keep == 100 ? 3 : keep == 0 ? 4 : 2;
+            ckLogin.Checked = Settings.LaunchAtLogin;
+        }
+
+        private void SaveAndClose()
+        {
+            Settings.Format = rbEnglish.Checked ? FileNameFormat.English
+                : rbBilingual.Checked ? FileNameFormat.Bilingual
+                : FileNameFormat.Local;
+            int[] days = new int[] { 5, 10, 50, 100, 0 };
+            Settings.KeepDays = days[Math.Max(0, cbKeep.SelectedIndex)];
+            Settings.LaunchAtLogin = ckLogin.Checked;
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Entry point
+    // ------------------------------------------------------------------
+
+    static class Program
+    {
+        [STAThread]
+        static int Main(string[] args)
+        {
+            bool selftest = false;
+            foreach (string a in args)
+                if (a == "--selftest") selftest = true;
+
+            if (selftest) return RunSelfTest();
+
+            bool createdNew;
+            var mutex = new Mutex(true, "BingWallpaperForWindows", out createdNew);
+            if (!createdNew) return 0; // already running
+
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new TrayApp());
+            GC.KeepAlive(mutex);
+            return 0;
+        }
+
+        // Headless verification: one update cycle, results written to
+        // selftest.txt in the state dir; exit code 0 unless it failed.
+        private static int RunSelfTest()
+        {
+            var lines = new List<string>();
+            int code = 0;
+            try
+            {
+                lines.Add("SaveDir=" + Core.SaveDir);
+                UpdateOutcome outcome = Core.Update().GetAwaiter().GetResult();
+                lines.Add("Outcome=" + outcome.ToString());
+                List<IndexEntry> index = Core.LoadIndex();
+                List<IndexEntry> onDisk = Core.OnDiskEntries(index);
+                lines.Add("OnDisk=" + onDisk.Count.ToString(CultureInfo.InvariantCulture));
+                foreach (IndexEntry e in onDisk)
+                    lines.Add("  " + e.StartDate + " -> " + e.FileName);
+                lines.Add("CurrentStartDate=" + Settings.CurrentStartDate);
+                if (outcome == UpdateOutcome.Failed) code = 2;
+            }
+            catch (Exception ex)
+            {
+                lines.Add("EXCEPTION " + ex.GetType().Name + ": " + ex.Message);
+                code = 3;
+            }
+            try { File.WriteAllLines(Path.Combine(Core.StateDir, "selftest.txt"), lines.ToArray()); }
+            catch { }
+            return code;
+        }
+    }
+}
