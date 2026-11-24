@@ -30,8 +30,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace BingWallpaperWin
 {
@@ -141,6 +141,12 @@ namespace BingWallpaperWin
         {
             get { return GetString("CurrentStartDate", ""); }
             set { SetString("CurrentStartDate", value); }
+        }
+
+        public static bool StickEnabled
+        {
+            get { return GetInt("StickEnabled", 0) != 0; }
+            set { SetInt("StickEnabled", value ? 1 : 0); }
         }
 
         public static DateTime LastUpdate
@@ -523,8 +529,10 @@ namespace BingWallpaperWin
             if (successes == 0) return UpdateOutcome.Failed;
 
             List<IndexEntry> onDisk = OnDiskEntries(index);
-            if (onDisk.Count > 0)
+            if (onDisk.Count > 0 && !Settings.StickEnabled)
             {
+                // Stick mode: new photos are still downloaded and archived,
+                // but the wallpaper stays on the pinned picture.
                 IndexEntry newest = onDisk[onDisk.Count - 1];
                 SetWallpaper(Path.Combine(SaveDir, newest.FileName));
                 Settings.CurrentStartDate = newest.StartDate;
@@ -540,7 +548,8 @@ namespace BingWallpaperWin
             for (int i = index.Count - 1; i >= 0; i--)
             {
                 IndexEntry e = index[i];
-                if (string.Compare(e.StartDate, threshold, StringComparison.Ordinal) <= 0)
+                bool pinned = Settings.StickEnabled && e.StartDate == Settings.CurrentStartDate;
+                if (string.Compare(e.StartDate, threshold, StringComparison.Ordinal) <= 0 && !pinned)
                 {
                     try
                     {
@@ -629,6 +638,7 @@ namespace BingWallpaperWin
         private NotifyIcon tray;
         private ToolStripMenuItem titleItem;
         private ToolStripMenuItem refreshItem;
+        private ToolStripMenuItem stickItem;
         private System.Windows.Forms.Timer timer;
         private bool updating;
 
@@ -667,6 +677,11 @@ namespace BingWallpaperWin
             var todayItem = new ToolStripMenuItem("Today");
             todayItem.Click += delegate { JumpToToday(); };
             menu.Items.Add(todayItem);
+
+            stickItem = new ToolStripMenuItem("Stick With This Picture");
+            stickItem.Checked = Settings.StickEnabled;
+            stickItem.Click += delegate { ToggleStick(); };
+            menu.Items.Add(stickItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -792,6 +807,18 @@ namespace BingWallpaperWin
             RefreshTitle();
         }
 
+        private void ToggleStick()
+        {
+            bool on = !Settings.StickEnabled;
+            Settings.StickEnabled = on;
+            stickItem.Checked = on;
+            if (!on)
+            {
+                // Stick released: today's picture goes up right away.
+                JumpToToday();
+            }
+        }
+
         private async Task SilentUpdate()
         {
             if (updating) return;
@@ -802,7 +829,9 @@ namespace BingWallpaperWin
                 if (outcome == UpdateOutcome.Updated)
                 {
                     RefreshTitle();
-                    tray.ShowBalloonTip(5000, "BingWallpaper", "New wallpaper set.", ToolTipIcon.Info);
+                    tray.ShowBalloonTip(5000, "BingWallpaper",
+                        Settings.StickEnabled ? "New photo downloaded." : "New wallpaper set.",
+                        ToolTipIcon.Info);
                 }
             }
             catch (Exception ex) { Core.Log("SilentUpdate failed: " + ex.Message); }

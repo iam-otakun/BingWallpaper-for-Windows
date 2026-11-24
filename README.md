@@ -42,6 +42,13 @@ feedback when you refresh by hand.
 - **Previous / Next Day / 前一天、后一天** — Step through the downloaded
   archive from the tray menu, and jump straight back with **Today**.
   在托盘菜单里翻看已下载的归档并切换壁纸，再用「Today」一键回到今天。
+- **Stick With This Picture / 钉住这张** — Fallen for one picture? Check
+  this menu item and the wallpaper stays put: new photos keep downloading
+  into the archive every day, they just are not set. Uncheck it and
+  today's picture goes up immediately. The pinned picture is also exempt
+  from the retention cleanup. 特别喜欢某张就打钩钉住：每天照常拉新图
+  入库，只是不再更换壁纸；取消打钩，立刻换上今天的图。钉住的图也不会
+  被保留期清理删掉。
 - **Custom file names / 自定义文件名** — Three formats, same as the Mac
   version: English, bilingual (Chinese + English), or local language.
   三档文件名格式，与 Mac 版一致：英文、双语（中文+英文）、本地语言。
