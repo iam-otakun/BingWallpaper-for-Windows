@@ -79,6 +79,14 @@ feedback when you refresh by hand.
   overwrite any more. 程序每天最多自动检查一次 GitHub 发布，有新版本
   时弹气泡提示；菜单里的「Check for Updates…」可随时手动检查。点安装
   即自动下载发布包、替换程序并重启——不必再手动下载、解压、覆盖。
+  Since 1.0.7 the app opts into modern TLS (strong crypto) and ships a
+  `BingWallpaper.exe.config` — keep it next to the exe. Without it, a
+  bare csc-built exe falls back to legacy TLS defaults: Bing tolerates
+  that, GitHub refuses the handshake, and the 1.0.6 update check could
+  never reach GitHub at all. / 1.0.7 起程序显式启用现代 TLS（强加密），
+  并随附 `BingWallpaper.exe.config`，请与 exe 放在一起。缺了它，裸 csc
+  构建的 exe 会落回旧式 TLS 默认：Bing 容忍，GitHub 直接拒绝握手——
+  1.0.6 的检查更新正是这样永远到不了 GitHub 的。
 - **Retention / 保留期** — Keep images 5 / 10 / 50 / 100 days, or forever.
   保留 5 / 10 / 50 / 100 天，或永久保留。
 - **Launch at login / 开机自启** — Optional, via the current user's Run

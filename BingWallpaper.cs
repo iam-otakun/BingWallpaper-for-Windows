@@ -31,8 +31,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.6.0")]
-[assembly: AssemblyFileVersion("1.0.6.0")]
+[assembly: AssemblyVersion("1.0.7.0")]
+[assembly: AssemblyFileVersion("1.0.7.0")]
 
 namespace BingWallpaperWin
 {
@@ -1482,6 +1482,18 @@ namespace BingWallpaperWin
         [STAThread]
         static int Main(string[] args)
         {
+            // A bare csc-built exe gets legacy TLS defaults (strong
+            // crypto off); Bing's endpoints tolerate that, GitHub's do
+            // not — the 1.0.6 update check died on the handshake
+            // ("Could not create SSL/TLS secure channel", verified by
+            // A/B probe 2026-11-24). Opt into strong crypto and
+            // TLS 1.2 before the networking stack wakes up. The
+            // shipped BingWallpaper.exe.config declares the same.
+            try { AppContext.SetSwitch("Switch.System.Net.DontEnableSchUseStrongCrypto", false); }
+            catch { }
+            try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11; }
+            catch { }
+
             bool selftest = false;
             bool updated = false;
             foreach (string a in args)
