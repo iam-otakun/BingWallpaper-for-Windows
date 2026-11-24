@@ -58,6 +58,12 @@ feedback when you refresh by hand.
   钉住期间点 Previous Day / Next Day / Today 浏览别的天，等于松开
   钉子：Stick 自动取消打勾，壁纸与标题跟着点击一起更新——三者永远
   一致，不会出现勾还打着、状态却已经走开的局面。
+- **Browsing boundaries / 浏览边界** — Previous Day greys out on the
+  oldest picture in the folder; Next Day and Today grey out on the
+  newest. The menu re-evaluates every time it opens, so the states
+  always match the picture on screen. / 翻到文件夹里最早的一张，
+  Previous Day 变灰；翻到最新的一张，Next Day 与 Today 变灰。每次
+  打开菜单都重新判断，状态永远和屏幕上的图一致。
 - **Custom file names / 自定义文件名** — Three formats, same as the Mac
   version: English, bilingual (Chinese + English), or local language.
   Changing the format in Settings takes effect immediately: today's and

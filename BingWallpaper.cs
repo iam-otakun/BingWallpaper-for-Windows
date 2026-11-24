@@ -31,8 +31,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.8.0")]
-[assembly: AssemblyFileVersion("1.0.8.0")]
+[assembly: AssemblyVersion("1.0.9.0")]
+[assembly: AssemblyFileVersion("1.0.9.0")]
 
 namespace BingWallpaperWin
 {
@@ -1029,6 +1029,9 @@ namespace BingWallpaperWin
         private ToolStripMenuItem refreshItem;
         private ToolStripMenuItem stickItem;
         private ToolStripMenuItem updateItem;
+        private ToolStripMenuItem prevItem;
+        private ToolStripMenuItem nextItem;
+        private ToolStripMenuItem todayItem;
         private ReleaseInfo pendingUpdate;
         private bool checkingUpdate;
         private System.Windows.Forms.Timer timer;
@@ -1075,14 +1078,14 @@ namespace BingWallpaperWin
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var prevItem = new ToolStripMenuItem("Previous Day");
+            prevItem = new ToolStripMenuItem("Previous Day");
             prevItem.Click += delegate { StepDay(-1); };
             menu.Items.Add(prevItem);
-            var nextItem = new ToolStripMenuItem("Next Day");
+            nextItem = new ToolStripMenuItem("Next Day");
             nextItem.Click += delegate { StepDay(1); };
             menu.Items.Add(nextItem);
 
-            var todayItem = new ToolStripMenuItem("Today");
+            todayItem = new ToolStripMenuItem("Today");
             todayItem.Click += delegate { JumpToToday(); };
             menu.Items.Add(todayItem);
 
@@ -1107,6 +1110,7 @@ namespace BingWallpaperWin
             quitItem.Click += delegate { ExitThread(); };
             menu.Items.Add(quitItem);
 
+            menu.Opening += delegate { UpdateNavState(); };
             tray.ContextMenuStrip = menu;
 
             RefreshTitle();
@@ -1214,6 +1218,30 @@ namespace BingWallpaperWin
                 Settings.StickEnabled = false;
                 stickItem.Checked = false;
             }
+        }
+
+        // Navigation items grey out at the archive boundaries: no
+        // older picture -> Previous Day disabled; already on the
+        // newest picture -> Next Day and Today disabled. Recomputed
+        // every time the menu opens, so it tracks refreshes too.
+        private void UpdateNavState()
+        {
+            List<IndexEntry> index = Core.LoadIndex();
+            List<IndexEntry> onDisk = Core.OnDiskEntries(index);
+            if (onDisk.Count == 0)
+            {
+                prevItem.Enabled = false;
+                nextItem.Enabled = false;
+                todayItem.Enabled = false;
+                return;
+            }
+            int pos = onDisk.Count - 1;
+            string cur = Settings.CurrentStartDate;
+            for (int i = 0; i < onDisk.Count; i++)
+                if (onDisk[i].StartDate == cur) { pos = i; break; }
+            prevItem.Enabled = pos > 0;
+            nextItem.Enabled = pos < onDisk.Count - 1;
+            todayItem.Enabled = pos < onDisk.Count - 1;
         }
 
         private void StepDay(int delta)
