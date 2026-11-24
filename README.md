@@ -10,6 +10,10 @@ you choose the picture source, the folder, and the file names.
 `图片\bing-wallpapers`，并把最新一张设为所有显示器的桌面壁纸。
 告别微软 Spotlight 的不可控——图片来源、保存目录、文件名都由你说了算。
 
+<p align="center">
+  <img width="400" alt="screenshot" src="screenshot.png">
+</p>
+
 ---
 
 ## About this app / 关于这个应用
@@ -46,12 +50,19 @@ feedback when you refresh by hand.
   this menu item and the wallpaper stays put: new photos keep downloading
   into the archive every day, they just are not set. Uncheck it and
   today's picture goes up immediately. The pinned picture is also exempt
-  from the retention cleanup. 特别喜欢某张就打钩钉住：每天照常拉新图
-  入库，只是不再更换壁纸；取消打钩，立刻换上今天的图。钉住的图也不会
-  被保留期清理删掉。
+  from the retention cleanup. The item sits at the top of the menu, right
+  under the picture it pins — the toggle and its picture belong together.
+  特别喜欢某张就打钩钉住：每天照常拉新图入库，只是不再更换壁纸；取消
+  打钩，立刻换上今天的图。钉住的图也不会被保留期清理删掉。这一项就
+  放在菜单最上方、紧贴它钉住的那张图——开关和它作用的对象在一组。
 - **Custom file names / 自定义文件名** — Three formats, same as the Mac
   version: English, bilingual (Chinese + English), or local language.
-  三档文件名格式，与 Mac 版一致：英文、双语（中文+英文）、本地语言。
+  Changing the format in Settings takes effect immediately: today's and
+  the recent photos are renamed to the new format, the wallpaper is
+  re-applied, and the menu title follows. 三档文件名格式，与 Mac 版
+  一致：英文、双语（中文+英文）、本地语言。在设置里改完格式点 OK
+  立刻生效：今天和最近的照片按新格式改名，壁纸重新设定，菜单标题
+  同步更新。
 - **Retention / 保留期** — Keep images 5 / 10 / 50 / 100 days, or forever.
   保留 5 / 10 / 50 / 100 天，或永久保留。
 - **Launch at login / 开机自启** — Optional, via the current user's Run
