@@ -31,8 +31,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("BingWallpaper")]
 [assembly: AssemblyProduct("BingWallpaper for Windows")]
-[assembly: AssemblyVersion("1.0.9.0")]
-[assembly: AssemblyFileVersion("1.0.9.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace BingWallpaperWin
 {
@@ -964,6 +964,82 @@ namespace BingWallpaperWin
     // image is still missing (the UpdateScheduleManager role).
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    // UI strings, bilingual (zh / en) — the same pattern as
+    // NetworkSwitch: the BINGWALLPAPER_LANG environment variable wins
+    // when set, otherwise the Windows UI language decides; zh* gets
+    // Chinese, everything else English. Brand names ("BingWallpaper",
+    // "Idea: Otakun", "Coding: Dash", "GitHub Repository") are not
+    // translated, exactly as in the sibling apps.
+    // ------------------------------------------------------------------
+
+    static class L
+    {
+        public static bool Zh;
+        public static string ABOUT_TITLE, VERSION_FMT, CLOSE;
+        public static string NO_IMAGE, STICK, OPEN_FOLDER, REFRESH;
+        public static string PREV_DAY, NEXT_DAY, TODAY, SETTINGS, CHECK_UPDATES, UPDATE_TO_FMT, ABOUT_MENU, QUIT;
+        public static string BALLOON_UPDATE_Q_FMT, UPDATE_AVAIL_TITLE, NEW_PHOTO_DL, NEW_WP_SET;
+        public static string REFRESH_OK, REFRESH_UPTODATE, REFRESH_FAIL;
+        public static string CHECK_FAIL, UPDATE_FOUND_FMT, UPDATE_BALLOON_TITLE, UPDATE_BALLOON_FMT;
+        public static string UPTODATE_FMT, CHECK_TITLE, DOWNLOADING_FMT, DL_FAIL, DL_FAIL_TITLE, INSTALL_FAIL;
+        public static string SET_TITLE, FMT_LABEL, FMT_ENGLISH, FMT_BILINGUAL, FMT_LOCAL;
+        public static string KEEP_LABEL, KEEP_DAYS_FMT, KEEP_FOREVER, LAUNCH_LOGIN, PHOTOS_FMT, OK, CANCEL;
+
+        static L()
+        {
+            string lang = Environment.GetEnvironmentVariable("BINGWALLPAPER_LANG");
+            if (string.IsNullOrEmpty(lang)) lang = CultureInfo.CurrentUICulture.Name;
+            Zh = lang != null && lang.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+            if (Zh)
+            {
+                ABOUT_TITLE = "关于"; VERSION_FMT = "版本 {0}"; CLOSE = "关闭";
+                NO_IMAGE = "（还没有图片）"; STICK = "钉住这张图"; OPEN_FOLDER = "打开照片文件夹"; REFRESH = "刷新图片";
+                PREV_DAY = "前一天"; NEXT_DAY = "后一天"; TODAY = "今天"; SETTINGS = "设置";
+                CHECK_UPDATES = "检查更新…"; UPDATE_TO_FMT = "更新到 {0}…"; ABOUT_MENU = "关于…"; QUIT = "退出";
+                BALLOON_UPDATE_Q_FMT = "现在下载并安装 BingWallpaper {0} 吗？程序会重启。";
+                UPDATE_AVAIL_TITLE = "有可用更新"; NEW_PHOTO_DL = "新照片已下载。"; NEW_WP_SET = "新壁纸已设置。";
+                REFRESH_OK = "更新成功！"; REFRESH_UPTODATE = "已是最新！"; REFRESH_FAIL = "更新失败！";
+                CHECK_FAIL = "无法检查更新，请稍后再试。";
+                UPDATE_FOUND_FMT = "BingWallpaper {0} 已发布（你现在是 v{1}）。\n\n现在下载并安装吗？程序会重启。";
+                UPDATE_BALLOON_TITLE = "BingWallpaper 更新";
+                UPDATE_BALLOON_FMT = "新版本 {0} 已发布，点击更新。";
+                UPTODATE_FMT = "BingWallpaper 已是最新版本（v{0}）。"; CHECK_TITLE = "检查更新";
+                DOWNLOADING_FMT = "正在下载更新 {0}…";
+                DL_FAIL = "更新没能下载下来，请稍后再试，或去 GitHub 下载。";
+                DL_FAIL_TITLE = "更新失败";
+                INSTALL_FAIL = "更新没能安装上，你现在的版本没有动。";
+                SET_TITLE = "BingWallpaper 设置"; FMT_LABEL = "文件名格式：";
+                FMT_ENGLISH = "英文名"; FMT_BILINGUAL = "双语"; FMT_LOCAL = "本地语言（跟随系统）";
+                KEEP_LABEL = "图片保留："; KEEP_DAYS_FMT = "{0} 天"; KEEP_FOREVER = "永久";
+                LAUNCH_LOGIN = "开机自动启动"; PHOTOS_FMT = "照片目录：{0}"; OK = "确定"; CANCEL = "取消";
+            }
+            else
+            {
+                ABOUT_TITLE = "About"; VERSION_FMT = "Version {0}"; CLOSE = "Close";
+                NO_IMAGE = "(no image yet)"; STICK = "Stick With This Picture"; OPEN_FOLDER = "Open Photo Folder"; REFRESH = "Refresh Images";
+                PREV_DAY = "Previous Day"; NEXT_DAY = "Next Day"; TODAY = "Today"; SETTINGS = "Settings";
+                CHECK_UPDATES = "Check for Updates…"; UPDATE_TO_FMT = "Update to {0}…"; ABOUT_MENU = "About…"; QUIT = "Quit";
+                BALLOON_UPDATE_Q_FMT = "Download and install BingWallpaper {0} now? The app will restart.";
+                UPDATE_AVAIL_TITLE = "Update available"; NEW_PHOTO_DL = "New photo downloaded."; NEW_WP_SET = "New wallpaper set.";
+                REFRESH_OK = "Update successfully!"; REFRESH_UPTODATE = "Up to date!"; REFRESH_FAIL = "Update failed!";
+                CHECK_FAIL = "Could not check for updates. Please try again later.";
+                UPDATE_FOUND_FMT = "BingWallpaper {0} is available (you have v{1}).\n\nDownload and install it now? The app will restart.";
+                UPDATE_BALLOON_TITLE = "BingWallpaper update";
+                UPDATE_BALLOON_FMT = "Version {0} is available. Click to update.";
+                UPTODATE_FMT = "BingWallpaper is up to date (v{0})."; CHECK_TITLE = "Check for Updates";
+                DOWNLOADING_FMT = "Downloading update {0}…";
+                DL_FAIL = "The update could not be downloaded. Please try again later, or download it from GitHub.";
+                DL_FAIL_TITLE = "Update failed";
+                INSTALL_FAIL = "The update could not be installed. Your current version is untouched.";
+                SET_TITLE = "BingWallpaper Settings"; FMT_LABEL = "File name format:";
+                FMT_ENGLISH = "English name"; FMT_BILINGUAL = "Bilingual"; FMT_LOCAL = "Local language (system)";
+                KEEP_LABEL = "Keep images for:"; KEEP_DAYS_FMT = "{0} days"; KEEP_FOREVER = "Forever";
+                LAUNCH_LOGIN = "Launch at login"; PHOTOS_FMT = "Photos: {0}"; OK = "OK"; CANCEL = "Cancel";
+            }
+        }
+    }
+
     // ---------------- about dialog ----------------
     // The house About, shared by all three Windows tray apps:
     // name, version, Idea: Otakun, Coding: Dash, and a link labelled
@@ -972,7 +1048,7 @@ namespace BingWallpaperWin
     {
         public AboutForm()
         {
-            Text = "About";
+            Text = L.ABOUT_TITLE;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -987,7 +1063,7 @@ namespace BingWallpaperWin
             Controls.Add(title);
 
             var ver = new Label();
-            ver.Text = "Version " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+            ver.Text = string.Format(L.VERSION_FMT, Assembly.GetExecutingAssembly().GetName().Version.ToString(3));
             ver.Location = new Point(16, 46);
             ver.Size = new Size(308, 18);
             Controls.Add(ver);
@@ -1012,7 +1088,7 @@ namespace BingWallpaperWin
             Controls.Add(link);
 
             var btn = new Button();
-            btn.Text = "Close";
+            btn.Text = L.CLOSE;
             btn.Location = new Point(244, 158);
             btn.Size = new Size(80, 28);
             btn.DialogResult = DialogResult.OK;
@@ -1049,7 +1125,7 @@ namespace BingWallpaperWin
             {
                 if (pendingUpdate != null)
                 {
-                    if (MessageBox.Show("Download and install BingWallpaper " + pendingUpdate.Tag + " now? The app will restart.", "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    if (MessageBox.Show(string.Format(L.BALLOON_UPDATE_Q_FMT, pendingUpdate.Tag), L.UPDATE_AVAIL_TITLE, MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     {
                         var ignored = InstallUpdate();
                     }
@@ -1057,56 +1133,56 @@ namespace BingWallpaperWin
             };
 
             var menu = new ContextMenuStrip();
-            titleItem = new ToolStripMenuItem("(no image yet)");
+            titleItem = new ToolStripMenuItem(L.NO_IMAGE);
             titleItem.Click += delegate { OpenCopyrightLink(); };
             menu.Items.Add(titleItem);
 
-            stickItem = new ToolStripMenuItem("Stick With This Picture");
+            stickItem = new ToolStripMenuItem(L.STICK);
             stickItem.Checked = Settings.StickEnabled;
             stickItem.Click += delegate { ToggleStick(); };
             menu.Items.Add(stickItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var openItem = new ToolStripMenuItem("Open Photo Folder");
+            var openItem = new ToolStripMenuItem(L.OPEN_FOLDER);
             openItem.Click += delegate { OpenPhotoFolder(); };
             menu.Items.Add(openItem);
 
-            refreshItem = new ToolStripMenuItem("Refresh Images");
+            refreshItem = new ToolStripMenuItem(L.REFRESH);
             refreshItem.Click += async delegate { await RefreshWithFeedback(); };
             menu.Items.Add(refreshItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
-            prevItem = new ToolStripMenuItem("Previous Day");
+            prevItem = new ToolStripMenuItem(L.PREV_DAY);
             prevItem.Click += delegate { StepDay(-1); };
             menu.Items.Add(prevItem);
-            nextItem = new ToolStripMenuItem("Next Day");
+            nextItem = new ToolStripMenuItem(L.NEXT_DAY);
             nextItem.Click += delegate { StepDay(1); };
             menu.Items.Add(nextItem);
 
-            todayItem = new ToolStripMenuItem("Today");
+            todayItem = new ToolStripMenuItem(L.TODAY);
             todayItem.Click += delegate { JumpToToday(); };
             menu.Items.Add(todayItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var settingsItem = new ToolStripMenuItem("Settings");
+            var settingsItem = new ToolStripMenuItem(L.SETTINGS);
             settingsItem.Click += delegate { ShowSettings(); };
             menu.Items.Add(settingsItem);
 
-            updateItem = new ToolStripMenuItem("Check for Updates…");
+            updateItem = new ToolStripMenuItem(L.CHECK_UPDATES);
             updateItem.Click += async delegate { await CheckForUpdates(true); };
             menu.Items.Add(updateItem);
 
-            var aboutItem = new ToolStripMenuItem("About…");
+            var aboutItem = new ToolStripMenuItem(L.ABOUT_MENU);
             aboutItem.Click += delegate
             {
                 using (var f = new AboutForm()) f.ShowDialog();
             };
             menu.Items.Add(aboutItem);
 
-            var quitItem = new ToolStripMenuItem("Quit");
+            var quitItem = new ToolStripMenuItem(L.QUIT);
             quitItem.Click += delegate { ExitThread(); };
             menu.Items.Add(quitItem);
 
@@ -1165,7 +1241,7 @@ namespace BingWallpaperWin
             IndexEntry cur = CurrentEntry();
             if (cur == null)
             {
-                titleItem.Text = "(no image yet)";
+                titleItem.Text = L.NO_IMAGE;
                 return;
             }
             string head = Core.Keywords(cur.Copyright ?? "");
@@ -1297,7 +1373,7 @@ namespace BingWallpaperWin
                 {
                     RefreshTitle();
                     tray.ShowBalloonTip(5000, "BingWallpaper",
-                        Settings.StickEnabled ? "New photo downloaded." : "New wallpaper set.",
+                        Settings.StickEnabled ? L.NEW_PHOTO_DL : L.NEW_WP_SET,
                         ToolTipIcon.Info);
                 }
             }
@@ -1315,16 +1391,16 @@ namespace BingWallpaperWin
                 UpdateOutcome outcome = await Core.Update();
                 RefreshTitle();
                 string message;
-                if (outcome == UpdateOutcome.Updated) message = "Update successfully!";
-                else if (outcome == UpdateOutcome.UpToDate) message = "Up to date!";
-                else message = "Update failed!";
+                if (outcome == UpdateOutcome.Updated) message = L.REFRESH_OK;
+                else if (outcome == UpdateOutcome.UpToDate) message = L.REFRESH_UPTODATE;
+                else message = L.REFRESH_FAIL;
                 MessageBox.Show(message, "BingWallpaper",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 Core.Log("Refresh failed: " + ex.Message);
-                MessageBox.Show("Update failed!", "BingWallpaper",
+                MessageBox.Show(L.REFRESH_FAIL, "BingWallpaper",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             finally
@@ -1344,7 +1420,7 @@ namespace BingWallpaperWin
                 if (rel == null)
                 {
                     if (interactive)
-                        MessageBox.Show("Could not check for updates. Please try again later.", "BingWallpaper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show(L.CHECK_FAIL, "BingWallpaper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 Settings.LastAppCheck = DateTime.Now;
@@ -1352,25 +1428,25 @@ namespace BingWallpaperWin
                 if (rel.Version > cur)
                 {
                     pendingUpdate = rel;
-                    updateItem.Text = "Update to " + rel.Tag + "…";
+                    updateItem.Text = string.Format(L.UPDATE_TO_FMT, rel.Tag);
                     if (interactive)
                     {
-                        if (MessageBox.Show("BingWallpaper " + rel.Tag + " is available (you have v" + cur.ToString(3) + ").\n\nDownload and install it now? The app will restart.", "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                        if (MessageBox.Show(string.Format(L.UPDATE_FOUND_FMT, rel.Tag, cur.ToString(3)), L.UPDATE_AVAIL_TITLE, MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                         {
                             await InstallUpdate();
                         }
                     }
                     else
                     {
-                        tray.BalloonTipTitle = "BingWallpaper update";
-                        tray.BalloonTipText = "Version " + rel.Tag + " is available. Click to update.";
+                        tray.BalloonTipTitle = L.UPDATE_BALLOON_TITLE;
+                        tray.BalloonTipText = string.Format(L.UPDATE_BALLOON_FMT, rel.Tag);
                         tray.BalloonTipIcon = ToolTipIcon.Info;
                         tray.ShowBalloonTip(8000);
                     }
                 }
                 else if (interactive)
                 {
-                    MessageBox.Show("BingWallpaper is up to date (v" + cur.ToString(3) + ").", "Check for Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(string.Format(L.UPTODATE_FMT, cur.ToString(3)), L.CHECK_TITLE, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex) { Core.Log("CheckForUpdates failed: " + ex.Message); }
@@ -1384,13 +1460,13 @@ namespace BingWallpaperWin
             try
             {
                 tray.BalloonTipTitle = "BingWallpaper";
-                tray.BalloonTipText = "Downloading update " + pendingUpdate.Tag + "…";
+                tray.BalloonTipText = string.Format(L.DOWNLOADING_FMT, pendingUpdate.Tag);
                 tray.BalloonTipIcon = ToolTipIcon.Info;
                 tray.ShowBalloonTip(4000);
                 string staged = await AppUpdate.Stage(pendingUpdate);
                 if (staged == null)
                 {
-                    MessageBox.Show("The update could not be downloaded. Please try again later, or download it from GitHub.", "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(L.DL_FAIL, L.DL_FAIL_TITLE, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 if (AppUpdate.SwapAndRelaunch(staged))
@@ -1399,7 +1475,7 @@ namespace BingWallpaperWin
                 }
                 else
                 {
-                    MessageBox.Show("The update could not be installed. Your current version is untouched.", "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(L.INSTALL_FAIL, L.DL_FAIL_TITLE, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
             catch (Exception ex) { Core.Log("InstallUpdate failed: " + ex.Message); }
@@ -1459,7 +1535,7 @@ namespace BingWallpaperWin
 
         public SettingsForm()
         {
-            Text = "BingWallpaper Settings";
+            Text = L.SET_TITLE;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -1468,52 +1544,52 @@ namespace BingWallpaperWin
             Height = 320;
 
             var lblFormat = new Label();
-            lblFormat.Text = "File name format:";
+            lblFormat.Text = L.FMT_LABEL;
             lblFormat.Left = 16; lblFormat.Top = 16; lblFormat.Width = 380;
             Controls.Add(lblFormat);
 
             rbEnglish = new RadioButton();
-            rbEnglish.Text = "English name — Bing_2026-11-24_Fiddlehead_fern.jpg";
+            rbEnglish.Text = L.FMT_ENGLISH + " — Bing_2026-11-24_Fiddlehead_fern.jpg";
             rbEnglish.Left = 32; rbEnglish.Top = 42; rbEnglish.Width = 380;
             Controls.Add(rbEnglish);
 
             rbBilingual = new RadioButton();
-            rbBilingual.Text = "Bilingual — Bing_2026-11-24_蕨菜_Fiddlehead_fern.jpg";
+            rbBilingual.Text = L.FMT_BILINGUAL + " — Bing_2026-11-24_蕨菜_Fiddlehead_fern.jpg";
             rbBilingual.Left = 32; rbBilingual.Top = 66; rbBilingual.Width = 380;
             Controls.Add(rbBilingual);
 
             rbLocal = new RadioButton();
-            rbLocal.Text = "Local language (system)";
+            rbLocal.Text = L.FMT_LOCAL;
             rbLocal.Left = 32; rbLocal.Top = 90; rbLocal.Width = 380;
             Controls.Add(rbLocal);
 
             var lblKeep = new Label();
-            lblKeep.Text = "Keep images for:";
+            lblKeep.Text = L.KEEP_LABEL;
             lblKeep.Left = 16; lblKeep.Top = 126; lblKeep.Width = 140;
             Controls.Add(lblKeep);
 
             cbKeep = new ComboBox();
             cbKeep.DropDownStyle = ComboBoxStyle.DropDownList;
             cbKeep.Left = 160; cbKeep.Top = 122; cbKeep.Width = 120;
-            cbKeep.Items.Add("5 days");
-            cbKeep.Items.Add("10 days");
-            cbKeep.Items.Add("50 days");
-            cbKeep.Items.Add("100 days");
-            cbKeep.Items.Add("Forever");
+            cbKeep.Items.Add(string.Format(L.KEEP_DAYS_FMT, 5));
+            cbKeep.Items.Add(string.Format(L.KEEP_DAYS_FMT, 10));
+            cbKeep.Items.Add(string.Format(L.KEEP_DAYS_FMT, 50));
+            cbKeep.Items.Add(string.Format(L.KEEP_DAYS_FMT, 100));
+            cbKeep.Items.Add(L.KEEP_FOREVER);
             Controls.Add(cbKeep);
 
             ckLogin = new CheckBox();
-            ckLogin.Text = "Launch at login";
+            ckLogin.Text = L.LAUNCH_LOGIN;
             ckLogin.Left = 16; ckLogin.Top = 160; ckLogin.Width = 380;
             Controls.Add(ckLogin);
 
             lblFolder = new Label();
-            lblFolder.Text = "Photos: " + Core.SaveDir;
+            lblFolder.Text = string.Format(L.PHOTOS_FMT, Core.SaveDir);
             lblFolder.Left = 16; lblFolder.Top = 192; lblFolder.Width = 380;
             Controls.Add(lblFolder);
 
             var btnFolder = new Button();
-            btnFolder.Text = "Open Photo Folder";
+            btnFolder.Text = L.OPEN_FOLDER;
             btnFolder.Left = 16; btnFolder.Top = 218; btnFolder.Width = 140;
             btnFolder.Click += delegate
             {
@@ -1527,13 +1603,13 @@ namespace BingWallpaperWin
             Controls.Add(btnFolder);
 
             var btnOk = new Button();
-            btnOk.Text = "OK";
+            btnOk.Text = L.OK;
             btnOk.Left = 232; btnOk.Top = 218; btnOk.Width = 80;
             btnOk.Click += delegate { SaveAndClose(); };
             Controls.Add(btnOk);
 
             var btnCancel = new Button();
-            btnCancel.Text = "Cancel";
+            btnCancel.Text = L.CANCEL;
             btnCancel.Left = 324; btnCancel.Top = 218; btnCancel.Width = 80;
             btnCancel.DialogResult = DialogResult.Cancel;
             Controls.Add(btnCancel);
@@ -1626,6 +1702,9 @@ namespace BingWallpaperWin
             try
             {
                 lines.Add("SaveDir=" + Core.SaveDir);
+                lines.Add("UICulture=" + CultureInfo.CurrentUICulture.Name);
+                lines.Add("Lang=" + (L.Zh ? "zh" : "en"));
+                lines.Add("Sample=" + L.STICK + " | " + L.SETTINGS + " | " + L.KEEP_FOREVER + " | " + L.QUIT);
                 UpdateOutcome outcome = Core.Update().GetAwaiter().GetResult();
                 lines.Add("Outcome=" + outcome.ToString());
                 List<IndexEntry> index = Core.LoadIndex();
