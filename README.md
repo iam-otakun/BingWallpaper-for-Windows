@@ -1,3 +1,7 @@
+> **This repository has moved / 本仓库已迁移** — development continues in [**BingWallpaper**](https://github.com/iam-otakun/BingWallpaper), where the macOS and Windows editions live together from v2.0.0 on. This repository is archived and kept for history only. / 后续开发已转到 [BingWallpaper](https://github.com/iam-otakun/BingWallpaper)：macOS 与 Windows 两端自 v2.0.0 起同住一个仓库。本仓库已归档，仅作历史留存。
+
+---
+
 # Bing Wallpaper for Windows
 
 A system-tray app for Windows that automatically downloads the newest
